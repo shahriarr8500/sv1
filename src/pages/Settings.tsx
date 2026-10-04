@@ -13,8 +13,10 @@ import {
   useSelectedSubjects,
   useStudentOS,
 } from "@/state/student-os";
+import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
-import { ArrowRight, LogOut } from "lucide-react";
+import { ArrowRight, LogOut, Moon, Sun } from "lucide-react";
+import { useTheme } from "next-themes";
 import { Navigate, useNavigate } from "react-router";
 
 /** Settings — account, data notes, and a shortcut into Settings → Goal. */
@@ -25,10 +27,12 @@ export default function SettingsPage() {
   const navigate = useNavigate();
   const subjects = useSelectedSubjects();
   const overall = useOverallProgress();
+  const { theme, setTheme } = useTheme();
 
   if (!profile) return <Navigate to="/onboarding" replace />;
 
   const accountLabel = user?.email ?? user?.name ?? "Guest session";
+  const isDark = theme === "dark";
 
   return (
     <motion.div
@@ -42,7 +46,7 @@ export default function SettingsPage() {
           Settings
         </h1>
         <p className="mt-1.5 text-muted-foreground">
-          Manage your goal and account.
+          Manage your goal, appearance, and account.
         </p>
       </div>
 
@@ -72,6 +76,58 @@ export default function SettingsPage() {
             {goalHeadline(profile)}
           </span>
           <span className="text-sm text-muted-foreground">{profile.exam}</span>
+        </CardContent>
+      </Card>
+
+      <Card className="gap-4">
+        <CardHeader>
+          <div className="space-y-1.5">
+            <CardTitle className="text-base">Appearance</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Switch between light mode and dark mode. Your choice is saved for
+              next time.
+            </p>
+          </div>
+        </CardHeader>
+        <CardContent className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            {isDark ? (
+              <Moon className="size-4 text-primary" aria-hidden />
+            ) : (
+              <Sun className="size-4 text-primary" aria-hidden />
+            )}
+            <span>{isDark ? "Dark mode is on" : "Light mode is on"}</span>
+          </div>
+          <div role="group" aria-label="Theme" className="flex gap-2">
+            <button
+              type="button"
+              aria-pressed={!isDark}
+              onClick={() => setTheme("light")}
+              className={cn(
+                "inline-flex cursor-pointer items-center gap-1.5 rounded-lg border px-3.5 py-2 text-sm transition-colors",
+                !isDark
+                  ? "border-primary/60 bg-primary/10 font-medium text-primary"
+                  : "border-border text-foreground hover:border-primary/40 hover:bg-accent",
+              )}
+            >
+              <Sun className="size-3.5" aria-hidden />
+              Light
+            </button>
+            <button
+              type="button"
+              aria-pressed={isDark}
+              onClick={() => setTheme("dark")}
+              className={cn(
+                "inline-flex cursor-pointer items-center gap-1.5 rounded-lg border px-3.5 py-2 text-sm transition-colors",
+                isDark
+                  ? "border-primary/60 bg-primary/10 font-medium text-primary"
+                  : "border-border text-foreground hover:border-primary/40 hover:bg-accent",
+              )}
+            >
+              <Moon className="size-3.5" aria-hidden />
+              Dark
+            </button>
+          </div>
         </CardContent>
       </Card>
 

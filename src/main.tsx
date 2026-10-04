@@ -7,6 +7,7 @@ import { WorkspaceProvider } from "@/state/workspace";
 import { StudyLogProvider } from "@/state/study-log";
 import { VlyToolbar } from "../vly-toolbar-readonly.tsx";
 import { ConvexAuthProvider } from "@convex-dev/auth/react";
+import { ThemeProvider } from "next-themes";
 import { ConvexReactClient } from "convex/react";
 import React, { StrictMode, useEffect, lazy, Suspense } from "react";
 import { createRoot } from "react-dom/client";
@@ -131,6 +132,11 @@ createRoot(document.getElementById("root")!).render(
         <VlyToolbar />
       </ToolbarErrorBoundary>
       <ConvexAuthProvider client={convex}>
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="light"
+          disableTransitionOnChange
+        >
         <StudentOSProvider>
           <WorkspaceProvider>
             <StudyLogProvider>
@@ -190,6 +196,7 @@ createRoot(document.getElementById("root")!).render(
             </StudyLogProvider>
           </WorkspaceProvider>
         </StudentOSProvider>
+        </ThemeProvider>
       </ConvexAuthProvider>
     </RootErrorBoundary>
   </StrictMode>,
