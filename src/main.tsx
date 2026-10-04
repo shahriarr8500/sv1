@@ -4,6 +4,7 @@ import { RequireAuth } from "@/components/RequireAuth";
 import { AppShell } from "@/components/student-os/AppShell";
 import { StudentOSProvider } from "@/state/student-os";
 import { WorkspaceProvider } from "@/state/workspace";
+import { StudyLogProvider } from "@/state/study-log";
 import { VlyToolbar } from "../vly-toolbar-readonly.tsx";
 import { ConvexAuthProvider } from "@convex-dev/auth/react";
 import { ConvexReactClient } from "convex/react";
@@ -27,6 +28,7 @@ const CatalogItem = lazy(() => import("./pages/CatalogItem.tsx"));
 const Checkout = lazy(() => import("./pages/Checkout.tsx"));
 const Bookings = lazy(() => import("./pages/Bookings.tsx"));
 const Admin = lazy(() => import("./pages/Admin.tsx"));
+const StudyTimer = lazy(() => import("./pages/StudyTimer.tsx"));
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
 
 // Simple loading fallback for route transitions
@@ -131,6 +133,7 @@ createRoot(document.getElementById("root")!).render(
       <ConvexAuthProvider client={convex}>
         <StudentOSProvider>
           <WorkspaceProvider>
+            <StudyLogProvider>
           <BrowserRouter>
             <RouteSyncer />
             <Suspense fallback={<RouteLoading />}>
@@ -176,6 +179,7 @@ createRoot(document.getElementById("root")!).render(
                   <Route path="/catalog/:itemId" element={<CatalogItem />} />
                   <Route path="/book/:itemId" element={<Checkout />} />
                   <Route path="/bookings" element={<Bookings />} />
+                  <Route path="/timer" element={<StudyTimer />} />
                   <Route path="/admin" element={<Admin />} />
                 </Route>
                 <Route path="*" element={<NotFound />} />
@@ -183,6 +187,7 @@ createRoot(document.getElementById("root")!).render(
             </Suspense>
           </BrowserRouter>
           <Toaster />
+            </StudyLogProvider>
           </WorkspaceProvider>
         </StudentOSProvider>
       </ConvexAuthProvider>

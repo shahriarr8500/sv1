@@ -104,8 +104,9 @@ export default function SettingsPage() {
         </CardHeader>
         <CardContent>
           <p className="text-sm leading-relaxed text-muted-foreground">
-            Goal details and syllabus completions are saved on this device, so
-            your progress survives refreshes. Currently tracking{" "}
+            Your goal, syllabus completions, catalog activity, bookings, and
+            study hours are all saved on this device, so everything survives a
+            refresh. Currently tracking{" "}
             <span className="font-medium text-foreground">
               {syllabusLabel(subjects)}
             </span>{" "}

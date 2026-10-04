@@ -305,7 +305,7 @@ export default function AdminPage() {
         <ShieldCheck className="mt-0.5 size-3.5 shrink-0" aria-hidden />
         <p>
           Everything in this area is stored on this device with the rest of
-          your Student OS data.
+          your Student OS V1 data.
         </p>
       </div>
     </motion.div>

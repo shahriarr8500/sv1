@@ -32,6 +32,7 @@ import {
   Settings,
   ShieldCheck,
   Target,
+  Timer,
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
@@ -127,6 +128,10 @@ function SidebarNav({
         <NavRow
           onNavigate={onNavigate}
           entry={{ to: "/bookings", label: "My bookings", icon: CalendarCheck }}
+        />
+        <NavRow
+          onNavigate={onNavigate}
+          entry={{ to: "/timer", label: "Study hours", icon: Timer }}
         />
         <NavRow onNavigate={onNavigate} entry={{ to: "/goal", label: "Goal", icon: Target }} />
         <NavRow
