@@ -146,7 +146,7 @@ createRoot(document.getElementById("root")!).render(
                   path="/onboarding"
                   element={
                     <RequireAuth
-                      title="Sign in to set up Student OS"
+                      title="Sign in to set up Student OS V1"
                       description="Your goal and syllabus progress are tied to your account."
                     >
                       <Onboarding />
@@ -156,7 +156,7 @@ createRoot(document.getElementById("root")!).render(
                 <Route
                   element={
                     <RequireAuth
-                      title="Sign in to open Student OS"
+                      title="Sign in to open Student OS V1"
                       description="Your dashboard, syllabus, and progress live behind sign-in."
                     >
                       <AppShell />

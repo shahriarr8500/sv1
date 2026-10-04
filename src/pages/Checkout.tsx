@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAccountLabel } from "@/hooks/use-account-label";
 import { formatPrice } from "@/lib/student-os/catalog";
+import { formatBookingDate } from "@/lib/student-os/format";
 import type { WorkspaceBooking } from "@/lib/student-os/workspace";
 import { cn } from "@/lib/utils";
 import { useCatalogItem, useWorkspace } from "@/state/workspace";
@@ -190,7 +191,7 @@ export default function CheckoutPage() {
               <dt className="text-muted-foreground">When</dt>
               <dd className="text-right font-medium">
                 {confirmed.date && confirmed.time
-                  ? `${confirmed.date} · ${confirmed.time}`
+                  ? `${formatBookingDate(confirmed.date)} · ${confirmed.time}`
                   : "Self-paced"}
               </dd>
             </div>

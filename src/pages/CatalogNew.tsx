@@ -77,7 +77,7 @@ export default function CatalogNewPage() {
     });
 
     toast.success("Published to the catalog", {
-      description: "Your post is now visible to everyone using Student OS.",
+      description: "Your post is now visible to everyone using Student OS V1.",
     });
     navigate(`/catalog/${id}`);
   };

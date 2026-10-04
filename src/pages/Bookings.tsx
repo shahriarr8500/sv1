@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { formatPrice } from "@/lib/student-os/catalog";
+import { formatBookingDate } from "@/lib/student-os/format";
 import { cn } from "@/lib/utils";
 import { useBookings, useWorkspace } from "@/state/workspace";
 import { motion } from "framer-motion";
@@ -90,7 +91,7 @@ export default function BookingsPage() {
                 </p>
                 <p className="mt-0.5 text-xs text-muted-foreground">
                   {booking.date && booking.time
-                    ? `${booking.date} · ${booking.time}`
+                    ? `${formatBookingDate(booking.date)} · ${booking.time}`
                     : "Self-paced"}
                 </p>
               </div>

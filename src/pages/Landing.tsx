@@ -103,7 +103,7 @@ export default function Landing() {
             className="flex cursor-pointer items-center gap-2.5 transition-opacity hover:opacity-80"
           >
             <img src={logo} alt="" width={26} height={26} className="rounded-md" />
-            <span className="text-sm font-bold tracking-tight">Student OS</span>
+            <span className="text-sm font-bold tracking-tight">Student OS V1</span>
           </Link>
 
           <nav
@@ -362,7 +362,7 @@ export default function Landing() {
               <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
                 Your goal, target, and exam sit at the very top of your
                 dashboard — the first thing you see every time you open
-                Student OS.
+                Student OS V1.
               </p>
             </div>
           </Reveal>

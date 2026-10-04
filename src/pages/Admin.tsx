@@ -1,12 +1,9 @@
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { formatRelativeDay } from "@/lib/student-os/format";
+import {
+  formatBookingDate,
+  formatRelativeDay,
+} from "@/lib/student-os/format";
 import { SEED_CATALOG, formatPrice } from "@/lib/student-os/catalog";
 import { cn } from "@/lib/utils";
 import { useBookings, useCatalogItems, useWorkspace } from "@/state/workspace";
@@ -263,7 +260,7 @@ export default function AdminPage() {
                   <p className="mt-1 text-xs text-muted-foreground">
                     {booking.customer} ·{" "}
                     {booking.date && booking.time
-                      ? `${booking.date} · ${booking.time}`
+                      ? `${formatBookingDate(booking.date)} · ${booking.time}`
                       : "Self-paced"}{" "}
                     · {booking.reference}
                   </p>

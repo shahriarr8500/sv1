@@ -256,7 +256,7 @@ export function AppShell() {
           side="left"
           className="w-72 gap-0 p-0 sm:max-w-72"
         >
-          <SheetTitle className="sr-only">Student OS navigation</SheetTitle>
+          <SheetTitle className="sr-only">Student OS V1 navigation</SheetTitle>
           <SheetDescription className="sr-only">
             Jump to your dashboard, subjects, goal, or settings.
           </SheetDescription>

@@ -75,6 +75,14 @@ export function formatItemCount(summary: ProgressSummary): string {
   return `${summary.completed} / ${summary.total}`;
 }
 
+/** "2026-10-05" → "Sun 5 Oct 2026"; absent → "Self-paced". */
+export function formatBookingDate(date?: string): string {
+  if (!date) return "Self-paced";
+  const parsed = new Date(`${date}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return date;
+  return format(parsed, "EEE d MMM yyyy");
+}
+
 /** Route to an item's checklist, anchored on the item row. */
 export function itemPath(location: ItemLocation): string {
   return `/syllabus/${location.subject.id}/${location.chapter.id}#${location.item.id}`;

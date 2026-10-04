@@ -6,6 +6,7 @@ import { OverallProgressCard } from "@/components/student-os/OverallProgressCard
 import { RecentProgress } from "@/components/student-os/RecentProgress";
 import { SubjectCard } from "@/components/student-os/SubjectCard";
 import { formatPrice } from "@/lib/student-os/catalog";
+import { formatBookingDate } from "@/lib/student-os/format";
 import {
   calculateSubjectProgress,
   findFirstIncompleteItem,
@@ -114,7 +115,7 @@ export default function DashboardPage() {
                   </p>
                   <p className="mt-1 text-sm text-muted-foreground">
                     {upcoming.date && upcoming.time
-                      ? `${upcoming.date} · ${upcoming.time}`
+                      ? `${formatBookingDate(upcoming.date)} · ${upcoming.time}`
                       : "Self-paced"}
                   </p>
                   <p className="mt-0.5 text-xs text-muted-foreground tabular-nums">

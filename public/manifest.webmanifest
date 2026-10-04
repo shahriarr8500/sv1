@@ -1,7 +1,7 @@
 {
-  "name": "Student OS",
-  "short_name": "Student OS",
-  "description": "A personal academic operating system: goal onboarding and PCMB syllabus progress tracking.",
+  "name": "Student OS V1",
+  "short_name": "Student OS V1",
+  "description": "Your all-in-one companion for the academic journey and the lifelong path to achievement.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",
