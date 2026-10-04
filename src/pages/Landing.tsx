@@ -7,8 +7,10 @@ import { CATALOG_TOTAL_ITEMS, SYLLABUS } from "@/lib/student-os/syllabus";
 import { motion } from "framer-motion";
 import {
   ArrowRight,
+  CalendarCheck,
   Check,
   Gauge,
+  LayoutGrid,
   ListChecks,
   Save,
   Target,
@@ -56,7 +58,7 @@ const FEATURES: Array<{
   {
     icon: Target,
     title: "Goal onboarding",
-    copy: "Goal, target, exam, level, curriculum, and subjects — captured once, then displayed everywhere.",
+    copy: "Your goal, target, exam, level, curriculum, and subjects — captured once, then displayed everywhere.",
   },
   {
     icon: ListChecks,
@@ -69,9 +71,19 @@ const FEATURES: Array<{
     copy: "Percentages come from real item counts — recalculated the moment you check something off.",
   },
   {
+    icon: LayoutGrid,
+    title: "Resource catalog",
+    copy: "Browse and search courses, guides, and sessions — or publish your own content for other students.",
+  },
+  {
+    icon: CalendarCheck,
+    title: "Book and check out",
+    copy: "Schedule a session at a time that suits you and complete checkout in one short, simple flow.",
+  },
+  {
     icon: Save,
     title: "Saved on this device",
-    copy: "Your profile and completions survive refreshes, behind a storage layer ready for a database later.",
+    copy: "Your profile, progress, and bookings survive refreshes, behind a storage layer ready for a database later.",
   },
 ];
 
@@ -110,6 +122,12 @@ export default function Landing() {
             >
               Syllabus
             </a>
+            <Link
+              to="/catalog"
+              className="cursor-pointer text-sm text-muted-foreground transition-colors hover:text-foreground"
+            >
+              Catalog
+            </Link>
           </nav>
 
           <div className="flex items-center gap-2">
@@ -140,10 +158,6 @@ export default function Landing() {
 
       {/* Hero */}
       <section className="relative overflow-hidden border-b">
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-x-0 top-0 h-80 bg-primary/[0.04]"
-        />
         <div className="relative mx-auto grid w-full max-w-6xl gap-12 px-4 py-16 sm:px-6 lg:grid-cols-2 lg:items-center lg:gap-16 lg:px-8 lg:py-24">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -153,13 +167,14 @@ export default function Landing() {
           >
             <span className="inline-flex items-center gap-2 rounded-lg border bg-card px-3 py-1 text-xs font-medium text-muted-foreground">
               <span className="size-1.5 rounded-full bg-primary" aria-hidden />
-              Personal academic operating system
+              All-in-one academic companion
             </span>
             <h1 className="mt-5 text-4xl leading-[1.06] font-bold tracking-tight sm:text-5xl">
               Turn a long-term goal into measurable progress.
             </h1>
             <p className="mt-5 text-lg text-muted-foreground">
-              Build your path. Track your progress. Become who you want to be.
+              Your all-in-one companion for the academic journey — and the
+              lifelong path to achievement that follows it.
             </p>
 
             <div className="mt-8 flex flex-wrap gap-3">
@@ -185,7 +200,7 @@ export default function Landing() {
               </li>
               <li className="flex items-center gap-2">
                 <Check className="size-4 text-primary" aria-hidden />
-                Progress saved automatically
+                Clean, simple, comfortable to use
               </li>
             </ul>
           </motion.div>
@@ -302,14 +317,15 @@ export default function Landing() {
         <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 lg:px-8">
           <Reveal className="max-w-2xl">
             <h2 className="text-2xl font-bold tracking-tight sm:text-3xl">
-              One job: show you exactly where you stand
+              One companion for the whole academic journey
             </h2>
             <p className="mt-3 text-muted-foreground">
-              Student OS starts as a focused foundation — goal onboarding, an
-              accurate syllabus tracker, and nothing you don&apos;t need yet.
+              Student OS V1 is the companion we provide to our customers —
+              everything an academic journey needs, kept deliberately simple and
+              comfortable so any student can pick it up and use it right away.
             </p>
           </Reveal>
-          <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {FEATURES.map((feature, index) => (
               <Reveal key={feature.title} delay={index * 0.06} className="h-full">
                 <div className="h-full rounded-xl border bg-card p-5">
@@ -460,7 +476,7 @@ export default function Landing() {
         <div className="mx-auto flex max-w-6xl flex-col gap-4 px-4 py-8 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
           <div className="flex items-center gap-2.5">
             <img src={logo} alt="" width={22} height={22} className="rounded-md" />
-            <span className="text-sm font-bold tracking-tight">Student OS</span>
+            <span className="text-sm font-bold tracking-tight">Student OS V1</span>
             <span className="text-xs text-muted-foreground">Foundation</span>
           </div>
           <p className="text-xs text-muted-foreground">

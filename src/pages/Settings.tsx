@@ -83,7 +83,7 @@ export default function SettingsPage() {
           <div className="min-w-0">
             <p className="truncate text-sm font-medium">{accountLabel}</p>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              Signed in to Student OS.
+              Signed in to Student OS V1.
             </p>
           </div>
           <Button

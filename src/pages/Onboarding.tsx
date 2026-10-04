@@ -233,7 +233,7 @@ export default function OnboardingPage() {
               className="rounded-2xl"
             />
             <h1 className="mt-7 text-3xl font-bold tracking-tight sm:text-4xl">
-              Welcome to Student OS
+              Welcome to Student OS V1
             </h1>
             <p className="mt-3 max-w-md text-base text-muted-foreground">
               Build your path. Track your progress. Become who you want to be.
@@ -358,7 +358,7 @@ export default function OnboardingPage() {
             className="flex cursor-pointer items-center gap-2.5 transition-opacity hover:opacity-80"
           >
             <img src={logo} alt="" width={26} height={26} className="rounded-md" />
-            <span className="text-sm font-bold tracking-tight">Student OS</span>
+            <span className="text-sm font-bold tracking-tight">Student OS V1</span>
           </Link>
           {stepIndex > 0 ? (
             <span className="text-xs font-medium text-muted-foreground tabular-nums">

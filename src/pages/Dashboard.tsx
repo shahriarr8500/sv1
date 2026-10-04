@@ -1,19 +1,27 @@
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ContinueStudying } from "@/components/student-os/ContinueStudying";
 import { GoalHeader } from "@/components/student-os/GoalHeader";
 import { OverallProgressCard } from "@/components/student-os/OverallProgressCard";
 import { RecentProgress } from "@/components/student-os/RecentProgress";
 import { SubjectCard } from "@/components/student-os/SubjectCard";
-import { useMemo } from "react";
+import { formatPrice } from "@/lib/student-os/catalog";
 import {
   calculateSubjectProgress,
   findFirstIncompleteItem,
   listRecentCompletions,
 } from "@/lib/student-os/progress";
+import { cn } from "@/lib/utils";
 import {
   useOverallProgress,
   useSelectedSubjects,
   useStudentOS,
 } from "@/state/student-os";
+import { useBookings } from "@/state/workspace";
+import { motion } from "framer-motion";
+import { CalendarCheck } from "lucide-react";
+import { useMemo } from "react";
+import { Link } from "react-router";
 
 /**
  * Dashboard — the Student OS home screen, in priority order:
@@ -36,6 +44,11 @@ export default function DashboardPage() {
   const recent = useMemo(
     () => listRecentCompletions(completions, 6),
     [completions],
+  );
+  const bookings = useBookings();
+  const upcoming = useMemo(
+    () => bookings.find((booking) => booking.status === "confirmed") ?? null,
+    [bookings],
   );
 
   // AppShell already redirects when no profile exists; this keeps types honest.
@@ -66,8 +79,60 @@ export default function DashboardPage() {
         </div>
       </section>
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div
+        className={cn(
+          "grid gap-4",
+          upcoming ? "lg:grid-cols-3" : "lg:grid-cols-2",
+        )}
+      >
         <ContinueStudying next={next} subjects={subjects} />
+        {upcoming ? (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.35, delay: 0.22, ease: "easeOut" }}
+            className="h-full"
+          >
+            <Card className="h-full gap-4">
+              <CardHeader>
+                <div className="flex items-center gap-2.5">
+                  <span
+                    aria-hidden
+                    className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary"
+                  >
+                    <CalendarCheck className="size-4" />
+                  </span>
+                  <CardTitle className="text-base">
+                    {upcoming.date ? "Upcoming session" : "Latest booking"}
+                  </CardTitle>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div>
+                  <p className="text-sm font-semibold tracking-tight">
+                    {upcoming.title}
+                  </p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {upcoming.date && upcoming.time
+                      ? `${upcoming.date} · ${upcoming.time}`
+                      : "Self-paced"}
+                  </p>
+                  <p className="mt-0.5 text-xs text-muted-foreground tabular-nums">
+                    {upcoming.reference} · {formatPrice(upcoming.amount)}
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full cursor-pointer"
+                  asChild
+                >
+                  <Link to="/bookings">My bookings</Link>
+                </Button>
+              </CardContent>
+            </Card>
+          </motion.div>
+        ) : null}
         <RecentProgress entries={recent} />
       </div>
     </div>

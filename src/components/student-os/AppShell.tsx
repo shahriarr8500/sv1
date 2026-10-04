@@ -13,7 +13,7 @@ import {
   SheetDescription,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { useAuth } from "@/hooks/use-auth";
+import { useAccountLabel } from "@/hooks/use-account-label";
 import { useSignOut } from "@/hooks/use-sign-out";
 import { iconForSubject } from "@/components/student-os/subject-icons";
 import { goalHeadline } from "@/lib/student-os/format";
@@ -24,10 +24,13 @@ import {
   useStudentOS,
 } from "@/state/student-os";
 import {
+  CalendarCheck,
   LayoutDashboard,
+  LayoutGrid,
   LogOut,
   Menu,
   Settings,
+  ShieldCheck,
   Target,
   type LucideIcon,
 } from "lucide-react";
@@ -117,23 +120,42 @@ function SidebarNav({
       </ul>
 
       <ul className="mt-6 space-y-1">
+        <NavRow
+          onNavigate={onNavigate}
+          entry={{ to: "/catalog", label: "Catalog", icon: LayoutGrid }}
+        />
+        <NavRow
+          onNavigate={onNavigate}
+          entry={{ to: "/bookings", label: "My bookings", icon: CalendarCheck }}
+        />
         <NavRow onNavigate={onNavigate} entry={{ to: "/goal", label: "Goal", icon: Target }} />
         <NavRow
           onNavigate={onNavigate}
           entry={{ to: "/settings", label: "Settings", icon: Settings }}
         />
       </ul>
+
+      <div className="mt-6 border-t pt-4">
+        <p className="px-3 pb-1.5 text-[11px] font-semibold tracking-wider text-muted-foreground uppercase">
+          Business
+        </p>
+        <ul>
+          <NavRow
+            onNavigate={onNavigate}
+            entry={{ to: "/admin", label: "Admin", icon: ShieldCheck }}
+          />
+        </ul>
+      </div>
     </nav>
   );
 }
 
 function AccountRow() {
-  const { user } = useAuth();
+  const label = useAccountLabel();
   const { profile } = useStudentOS();
   const signOut = useSignOut();
 
-  const label = user?.email ?? user?.name ?? "Guest session";
-  const initial = (user?.name ?? user?.email ?? "S").charAt(0).toUpperCase();
+  const initial = label.charAt(0).toUpperCase();
 
   return (
     <div className="flex items-center gap-3 rounded-lg px-2 py-1.5">
@@ -171,7 +193,7 @@ function BrandMark() {
       className="flex cursor-pointer items-center gap-2.5 transition-opacity hover:opacity-80"
     >
       <img src={logo} alt="" width={26} height={26} className="rounded-md" />
-      <span className="text-sm font-bold tracking-tight">Student OS</span>
+      <span className="text-sm font-bold tracking-tight">Student OS V1</span>
     </Link>
   );
 }

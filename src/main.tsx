@@ -3,6 +3,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { RequireAuth } from "@/components/RequireAuth";
 import { AppShell } from "@/components/student-os/AppShell";
 import { StudentOSProvider } from "@/state/student-os";
+import { WorkspaceProvider } from "@/state/workspace";
 import { VlyToolbar } from "../vly-toolbar-readonly.tsx";
 import { ConvexAuthProvider } from "@convex-dev/auth/react";
 import { ConvexReactClient } from "convex/react";
@@ -20,6 +21,12 @@ const Subject = lazy(() => import("./pages/Subject.tsx"));
 const Chapter = lazy(() => import("./pages/Chapter.tsx"));
 const Goal = lazy(() => import("./pages/Goal.tsx"));
 const Settings = lazy(() => import("./pages/Settings.tsx"));
+const Catalog = lazy(() => import("./pages/Catalog.tsx"));
+const CatalogNew = lazy(() => import("./pages/CatalogNew.tsx"));
+const CatalogItem = lazy(() => import("./pages/CatalogItem.tsx"));
+const Checkout = lazy(() => import("./pages/Checkout.tsx"));
+const Bookings = lazy(() => import("./pages/Bookings.tsx"));
+const Admin = lazy(() => import("./pages/Admin.tsx"));
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
 
 // Simple loading fallback for route transitions
@@ -123,6 +130,7 @@ createRoot(document.getElementById("root")!).render(
       </ToolbarErrorBoundary>
       <ConvexAuthProvider client={convex}>
         <StudentOSProvider>
+          <WorkspaceProvider>
           <BrowserRouter>
             <RouteSyncer />
             <Suspense fallback={<RouteLoading />}>
@@ -163,12 +171,19 @@ createRoot(document.getElementById("root")!).render(
                   />
                   <Route path="/goal" element={<Goal />} />
                   <Route path="/settings" element={<Settings />} />
+                  <Route path="/catalog" element={<Catalog />} />
+                  <Route path="/catalog/new" element={<CatalogNew />} />
+                  <Route path="/catalog/:itemId" element={<CatalogItem />} />
+                  <Route path="/book/:itemId" element={<Checkout />} />
+                  <Route path="/bookings" element={<Bookings />} />
+                  <Route path="/admin" element={<Admin />} />
                 </Route>
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </Suspense>
           </BrowserRouter>
           <Toaster />
+          </WorkspaceProvider>
         </StudentOSProvider>
       </ConvexAuthProvider>
     </RootErrorBoundary>
