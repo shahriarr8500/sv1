@@ -1,0 +1,17 @@
+{
+  "name": "Student OS",
+  "short_name": "Student OS",
+  "description": "A personal academic operating system: goal onboarding and PCMB syllabus progress tracking.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#2563eb",
+  "icons": [
+    {
+      "src": "/logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
