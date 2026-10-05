@@ -5,7 +5,7 @@
  * recent activity, and the dashboard instantly (no reloads).
  */
 
-import { useConvexAuth, useMutation } from "convex/react";
+import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import {
   createContext,
   useCallback,
@@ -41,18 +41,61 @@ const StudentOSContext = createContext<StudentOSContextValue | null>(null);
 const SYNC_DEBOUNCE_MS = 2000;
 
 export function StudentOSProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<StudentOSState>(() => repository.load());
+  /** This browser's own Student OS state. */
+  const [localState, setLocalState] = useState<StudentOSState>(() =>
+    repository.load(),
+  );
+  /** Edits made while impersonating somebody else, seeded from their record. */
+  const [impersonatedEdits, setImpersonatedEdits] = useState<
+    StudentOSState | null
+  >(null);
   const { isAuthenticated } = useConvexAuth();
   const syncProgress = useMutation(api.progress.syncMyProgress);
   const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Persist on every change so progress survives refreshes.
-  useEffect(() => {
-    repository.save(state);
-  }, [state]);
+  // While an admin is signed in as somebody else, the state shown is the
+  // target's — read from the server instead of this browser's storage, and
+  // never written back to it.
+  const impersonation = useQuery(api.impersonation.active, "skip");
+  const isImpersonating = impersonation?.active === true;
+  const targetState = useQuery(
+    api.impersonation.targetState,
+    isImpersonating ? {} : "skip",
+  );
 
-  // Mirror this student's state onto their Convex account so the admin
-  // console can read it. Debounced, and a no-op while signed out.
+  const state = useMemo<StudentOSState>(() => {
+    if (!isImpersonating) return localState;
+    if (impersonatedEdits !== null) return impersonatedEdits;
+    if (targetState === undefined) return { version: 1, profile: null, completions: {} };
+    return {
+      version: 1,
+      profile: (targetState.profile as StudentProfile | null) ?? null,
+      completions: targetState.completions ?? {},
+    };
+  }, [isImpersonating, localState, impersonatedEdits, targetState]);
+
+  /** Applies an update to whichever account is currently being viewed. */
+  const updateState = useCallback(
+    (updater: (previous: StudentOSState) => StudentOSState) => {
+      if (isImpersonating) {
+        setImpersonatedEdits((previous) => updater(previous ?? state));
+      } else {
+        setLocalState(updater);
+      }
+    },
+    [isImpersonating, state],
+  );
+
+  // Persist this browser's own changes so progress survives refreshes — never
+  // while impersonating, or the admin's state would overwrite the target's.
+  useEffect(() => {
+    if (isImpersonating) return;
+    repository.save(localState);
+  }, [localState, isImpersonating]);
+
+  // Mirror the visible state onto the right Convex account so the admin
+  // console can read it. Debounced, and a no-op while signed out. While an
+  // admin is impersonating, the server routes the write to the target.
   useEffect(() => {
     if (!isAuthenticated) return;
     if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
@@ -68,21 +111,27 @@ export function StudentOSProvider({ children }: { children: ReactNode }) {
     };
   }, [state, isAuthenticated, syncProgress]);
 
-  const saveProfile = useCallback((profile: StudentProfile) => {
-    setState((previous) => ({ ...previous, profile }));
-  }, []);
+  const saveProfile = useCallback(
+    (profile: StudentProfile) => {
+      updateState((previous) => ({ ...previous, profile }));
+    },
+    [updateState],
+  );
 
-  const toggleItem = useCallback((itemId: string, completed: boolean) => {
-    setState((previous) => {
-      const completions = { ...previous.completions };
-      if (completed) {
-        completions[itemId] = Date.now();
-      } else {
-        delete completions[itemId];
-      }
-      return { ...previous, completions };
-    });
-  }, []);
+  const toggleItem = useCallback(
+    (itemId: string, completed: boolean) => {
+      updateState((previous) => {
+        const completions = { ...previous.completions };
+        if (completed) {
+          completions[itemId] = Date.now();
+        } else {
+          delete completions[itemId];
+        }
+        return { ...previous, completions };
+      });
+    },
+    [updateState],
+  );
 
   const value = useMemo(
     () => ({

@@ -38,6 +38,20 @@ const schema = defineSchema(
 
     // add other tables here
 
+    // Audit trail of admin "log in as" sessions. The row is kept after it ends
+    // so there is always a record of who entered whose account and when.
+    impersonations: defineTable({
+      adminUserId: v.id("users"),
+      targetUserId: v.id("users"),
+      startedAt: v.number(),
+      /** null while the session is still open. */
+      endedAt: v.optional(v.union(v.number(), v.null())),
+      /** Cleared when the session ends so only one can be open at a time. */
+      active: v.optional(v.boolean()),
+    })
+      .index("adminUserId", ["adminUserId"])
+      .index("active", ["active"]),
+
     // tableName: defineTable({
     //   ...
     //   // table fields

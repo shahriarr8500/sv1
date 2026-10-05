@@ -10,6 +10,7 @@ import {
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { useAuth } from "@/hooks/use-auth";
+import { useImpersonation } from "@/hooks/use-impersonation";
 import { calculateSubjectProgress } from "@/lib/student-os/progress";
 import { formatItemCount, formatRelativeDay } from "@/lib/student-os/format";
 import { SYLLABUS } from "@/lib/student-os/syllabus";
@@ -19,6 +20,7 @@ import {
   ChevronDown,
   ChevronUp,
   Loader2,
+  LogIn,
   RotateCcw,
   Save,
   ShieldOff,
@@ -79,6 +81,8 @@ function UserCard({
 }) {
   const updateUser = useMutation(api.admin.updateUser);
   const updateProgress = useMutation(api.admin.updateUserProgress);
+  const navigate = useNavigate();
+  const { impersonate } = useImpersonation();
   const [expanded, setExpanded] = useState(false);
   const [name, setName] = useState(user.name ?? "");
   const [role, setRole] = useState(user.role);
@@ -184,27 +188,39 @@ function UserCard({
                 </SelectContent>
               </Select>
             </div>
+          </div><div className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              className="cursor-pointer"
+              disabled={isSaving}
+              onClick={() =>
+                run(
+                  () => updateUser({ userId: user.id, name, role }),
+                  "Account updated",
+                )
+              }
+            >
+              {isSaving ? (
+                <Loader2 className="mr-2 size-4 animate-spin" />
+              ) : (
+                <Save className="mr-2 size-4" />
+              )}
+              Save account changes
+            </Button>
+            <Button
+              className="cursor-pointer"
+              disabled={isSaving || isSelf}
+              onClick={async () => {
+                setIsSaving(true);
+                const ok = await impersonate(user.id);
+                if (ok) navigate("/dashboard");
+                else setIsSaving(false);
+              }}
+            >
+              <LogIn className="mr-2 size-4" />
+              Log in as this user
+            </Button>
           </div>
-
-          <Button
-            variant="outline"
-            className="cursor-pointer"
-            disabled={isSaving}
-            onClick={() =>
-              run(
-                () =>
-                  updateUser({ userId: user.id, name, role }),
-                "Account updated",
-              )
-            }
-          >
-            {isSaving ? (
-              <Loader2 className="mr-2 size-4 animate-spin" />
-            ) : (
-              <Save className="mr-2 size-4" />
-            )}
-            Save account changes
-          </Button>
 
           {/* Dashboard progress */}
           <div className="space-y-3">

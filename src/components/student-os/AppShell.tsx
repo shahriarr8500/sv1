@@ -14,6 +14,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { useAccountLabel } from "@/hooks/use-account-label";
+import { useImpersonation } from "@/hooks/use-impersonation";
 import { useSignOut } from "@/hooks/use-sign-out";
 import { iconForSubject } from "@/components/student-os/subject-icons";
 import { goalHeadline } from "@/lib/student-os/format";
@@ -33,6 +34,7 @@ import {
   ShieldCheck,
   Target,
   Timer,
+  UserCog,
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
@@ -191,6 +193,38 @@ function AccountRow() {
   );
 }
 
+function ImpersonationBanner() {
+  const { isImpersonating, target, endImpersonation } = useImpersonation();
+
+  if (!isImpersonating || !target) return null;
+
+  const label = target.name || target.email || "this account";
+
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-primary/10 px-4 py-2 text-sm lg:px-8">
+      <p className="flex min-w-0 items-center gap-2">
+        <UserCog className="size-4 shrink-0 text-primary" aria-hidden />
+        <span className="truncate">
+          You are logged in as <span className="font-semibold">{label}</span>
+        </span>
+      </p>
+      <Button
+        size="sm"
+        variant="outline"
+        className="cursor-pointer"
+        onClick={async () => {
+          if (await endImpersonation()) {
+            // Full reload so the app state returns to the admin's own account.
+            window.location.assign("/admin-console");
+          }
+        }}
+      >
+        Stop and go back to my account
+      </Button>
+    </div>
+  );
+}
+
 function BrandMark() {
   return (
     <Link
@@ -227,6 +261,7 @@ export function AppShell() {
 
   return (
     <div className="min-h-screen bg-background">
+      <ImpersonationBanner />
       {/* Mobile top bar */}
       <header className="sticky top-0 z-40 flex h-14 items-center gap-3 border-b bg-background px-4 lg:hidden">
         <Button
