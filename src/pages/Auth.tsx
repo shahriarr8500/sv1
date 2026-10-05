@@ -58,8 +58,13 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     setError(null);
     try {
       const formData = new FormData(event.currentTarget);
+      // Convex Auth matches accounts on an exact email string, so an address
+      // typed with different casing or a stray space would create a brand new
+      // account instead of signing into the existing one. Normalize first.
+      const email = (formData.get("email") as string).trim().toLowerCase();
+      formData.set("email", email);
       await signIn("email-otp", formData);
-      setStep({ email: formData.get("email") as string });
+      setStep({ email });
       setIsLoading(false);
     } catch (error) {
       console.error("Email sign-in error:", error);
@@ -78,9 +83,8 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     setError(null);
     try {
       const formData = new FormData(event.currentTarget);
+      formData.set("email", (formData.get("email") as string).trim().toLowerCase());
       await signIn("email-otp", formData);
-
-      console.log("signed in");
 
       navigate(redirect);
     } catch (error) {
