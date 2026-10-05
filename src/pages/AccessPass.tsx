@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { StudentOsLogo } from "@/components/student-os/StudentOsLogo";
 import {
   Card,
   CardContent,
@@ -8,7 +9,6 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import logo from "@/assets/logo.svg";
 import { useAccessPass } from "@/hooks/use-access-pass";
 import { useAuth } from "@/hooks/use-auth";
 import { ArrowRight, KeyRound, Loader2, LogOut, ShieldCheck } from "lucide-react";
@@ -71,14 +71,14 @@ export default function AccessPass() {
       <Card className="w-full max-md">
         <CardHeader className="text-center">
           <div className="flex justify-center">
-            <img
-              src={logo}
-              alt="Student OS V1"
-              width={56}
-              height={56}
-              className="mb-4 mt-2 cursor-pointer rounded-lg"
+            <button
+              type="button"
+              aria-label="Back to home"
+              className="mb-4 mt-2 cursor-pointer"
               onClick={() => navigate("/")}
-            />
+            >
+              <StudentOsLogo className="size-14" />
+            </button>
           </div>
           <CardTitle className="text-xl">Enter your access pass</CardTitle>
           <CardDescription>

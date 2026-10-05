@@ -1,5 +1,5 @@
-import logo from "@/assets/logo.svg";
 import { iconForSubject } from "@/components/student-os/subject-icons";
+import { StudentOsLogo } from "@/components/student-os/StudentOsLogo";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { useAuth } from "@/hooks/use-auth";
@@ -102,7 +102,7 @@ export default function Landing() {
             to="/"
             className="flex cursor-pointer items-center gap-2.5 transition-opacity hover:opacity-80"
           >
-            <img src={logo} alt="" width={26} height={26} className="rounded-md" />
+            <StudentOsLogo className="size-6" strokeWidth={18} />
             <span className="text-sm font-bold tracking-tight">Student OS V1</span>
           </Link>
 
@@ -475,7 +475,7 @@ export default function Landing() {
       <footer className="border-t">
         <div className="mx-auto flex max-w-6xl flex-col gap-4 px-4 py-8 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
           <div className="flex items-center gap-2.5">
-            <img src={logo} alt="" width={22} height={22} className="rounded-md" />
+            <StudentOsLogo className="size-6" strokeWidth={18} />
             <span className="text-sm font-bold tracking-tight">Student OS V1</span>
             <span className="text-xs text-muted-foreground">Foundation</span>
           </div>

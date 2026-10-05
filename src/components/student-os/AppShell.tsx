@@ -5,8 +5,8 @@
  * onboarding instead of an empty dashboard.
  */
 
-import logo from "@/assets/logo.svg";
 import { Button } from "@/components/ui/button";
+import { StudentOsLogo } from "@/components/student-os/StudentOsLogo";
 import {
   Sheet,
   SheetContent,
@@ -232,7 +232,7 @@ function BrandMark() {
       to="/"
       className="flex cursor-pointer items-center gap-2.5 transition-opacity hover:opacity-80"
     >
-      <img src={logo} alt="" width={26} height={26} className="rounded-md" />
+      <StudentOsLogo className="size-6" strokeWidth={18} />
       <span className="text-sm font-bold tracking-tight">Student OS V1</span>
     </Link>
   );

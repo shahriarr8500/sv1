@@ -1,9 +1,9 @@
-import logo from "@/assets/logo.svg";
 import {
   ChoiceSelect,
   ExampleChips,
   SubjectPicker,
 } from "@/components/student-os/fields";
+import { StudentOsLogo } from "@/components/student-os/StudentOsLogo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -225,13 +225,7 @@ export default function OnboardingPage() {
       case "welcome":
         return (
           <div className="flex flex-col items-center py-6 text-center">
-            <img
-              src={logo}
-              alt=""
-              width={64}
-              height={64}
-              className="rounded-2xl"
-            />
+            <StudentOsLogo className="size-6" strokeWidth={18} />
             <h1 className="mt-7 text-3xl font-bold tracking-tight sm:text-4xl">
               Welcome to Student OS V1
             </h1>
@@ -357,7 +351,7 @@ export default function OnboardingPage() {
             to="/"
             className="flex cursor-pointer items-center gap-2.5 transition-opacity hover:opacity-80"
           >
-            <img src={logo} alt="" width={26} height={26} className="rounded-md" />
+            <StudentOsLogo className="size-6" strokeWidth={18} />
             <span className="text-sm font-bold tracking-tight">Student OS V1</span>
           </Link>
           {stepIndex > 0 ? (
