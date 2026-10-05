@@ -245,13 +245,19 @@ export type PaperView = "1st" | "2nd" | "all";
 export function useSubjectsForPaper(view: PaperView): Subject[] {
   const subjects = useSelectedSubjects();
   return useMemo(() => {
-    const wanted = new Set(
-      subjects.map((subject) =>
-        view === "2nd"
-          ? `${subject.id.replace(/-2nd$/, "")}-2nd`
-          : subject.id.replace(/-2nd$/, ""),
-      ),
-    );
+    const wanted = new Set<string>();
+    for (const subject of subjects) {
+      const base = subject.id.replace(/-2nd$/, "");
+      if (view === "2nd") {
+        wanted.add(`${base}-2nd`);
+      } else if (view === "all") {
+        // "All Papers" covers both papers of every tracked subject.
+        wanted.add(base);
+        wanted.add(`${base}-2nd`);
+      } else {
+        wanted.add(base);
+      }
+    }
     return SYLLABUS.filter((subject) => wanted.has(subject.id));
   }, [subjects, view]);
 }

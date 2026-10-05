@@ -18,25 +18,46 @@ export function goalHeadline(
   return [profile.goal.trim(), profile.target.trim()].filter(Boolean).join(" ");
 }
 
+/**
+ * True when these subjects cover the full PCMB set, counting each subject once
+ * regardless of how many papers are in view (both papers at once is still
+ * PCMB, just twice over).
+ */
 function isPcmb(subjects: Subject[]): boolean {
+  const keys = new Set(subjects.map((subject) => subject.subjectKey));
   return (
-    subjects.length === PCMB_SUBJECT_IDS.length &&
-    PCMB_SUBJECT_IDS.every((id) => subjects.some((subject) => subject.id === id))
+    keys.size === PCMB_SUBJECT_IDS.length &&
+    PCMB_SUBJECT_IDS.every((id) => keys.has(id))
   );
 }
 
-/** Label for the overall progress card, e.g. "PCMB 1st Paper". */
+/** "1st Paper", "2nd Paper", or "All Papers" for the papers in view. */
+function paperScope(subjects: Subject[]): string {
+  const keys = new Set(subjects.map((subject) => subject.paperKey));
+  if (keys.size !== 1) return "All Papers";
+  return subjects[0].paper;
+}
+
+/** Distinct subject names, so both papers of a subject read once, not twice. */
+function subjectNames(subjects: Subject[]): string[] {
+  return [...new Set(subjects.map((subject) => subject.name))];
+}
+
+/**
+ * Label for the overall progress card, e.g. "PCMB 1st Paper" or
+ * "PCMB · All Papers" when both papers are in view.
+ */
 export function syllabusLabel(subjects: Subject[]): string {
-  if (isPcmb(subjects)) return "PCMB 1st Paper";
-  const names = subjects.map((subject) => subject.name);
-  if (names.length === 1) return `${names[0]} 1st Paper`;
-  return names.join(" · ");
+  if (subjects.length === 0) return "Syllabus";
+  const scope = paperScope(subjects);
+  const base = isPcmb(subjects) ? "PCMB" : subjectNames(subjects).join(" · ");
+  return scope === "All Papers" ? `${base} · All Papers` : `${base} ${scope}`;
 }
 
 /** Short label used in sentences, e.g. "PCMB syllabus completed". */
 export function syllabusShortLabel(subjects: Subject[]): string {
   if (isPcmb(subjects)) return "PCMB";
-  return subjects.map((subject) => subject.name).join(" · ");
+  return subjectNames(subjects).join(" · ");
 }
 
 /** "Chapter 1" or "Chapter 1 · Laboratory Safety". */
