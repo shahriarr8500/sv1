@@ -84,13 +84,15 @@ export function StudentOSProvider({ children }: { children: ReactNode }) {
     !isImpersonating &&
     serverProgress !== undefined &&
     serverProgress !== null &&
-    localState.profile === null &&
+    Object.keys(serverProgress.completions).length > 0 &&
     Object.keys(localState.completions).length === 0;
   if (shouldHydrate) {
     setHydrated(true);
     setLocalState({
       version: 1,
-      profile: (serverProgress.profile as StudentProfile | null) ?? null,
+      profile:
+        (serverProgress.profile as StudentProfile | null) ??
+        localState.profile,
       completions: serverProgress.completions,
     });
   }
@@ -200,7 +202,9 @@ export function useSelectedSubjects(): Subject[] {
   return useMemo(() => {
     if (!profile) return [];
     const selected = new Set(profile.subjects);
-    return SYLLABUS.filter((subject) => selected.has(subject.id));
+    return SYLLABUS.filter(
+      (subject) => subject.paperKey === "1st" && selected.has(subject.id),
+    );
   }, [profile]);
 }
 

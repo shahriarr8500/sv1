@@ -171,7 +171,7 @@ export function SubjectPicker({
 }) {
   return (
     <div className="grid gap-3 sm:grid-cols-2">
-      {SYLLABUS.map((subject) => {
+      {SYLLABUS.filter((subject) => subject.paperKey === "1st").map((subject) => {
         const checkboxId = `subject-option-${subject.id}`;
         const checked = selectedIds.includes(subject.id);
         return (

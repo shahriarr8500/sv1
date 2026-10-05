@@ -51,8 +51,15 @@ export interface StudentProfile {
   subjects: string[];
 }
 
+/** Which HSC paper a subject belongs to. */
+export type PaperKey = "1st" | "2nd";
+
 export interface Subject {
+  /** Unique key within its paper: `physics` or `physics-2nd`. */
   id: string;
+  /** Base key shared by both papers, e.g. `physics`. */
+  subjectKey: string;
+  paperKey: PaperKey;
   name: string;
   paper: string;
   chapters: Chapter[];
