@@ -192,3 +192,40 @@ export function useSubjectProgress(subject: Subject | undefined): ProgressSummar
     [subject, completions],
   );
 }
+
+/* -------------------------------------------------------------------------- */
+/* Paper-aware helpers                                                        */
+/* -------------------------------------------------------------------------- */
+
+/** Which paper the student is looking at. */
+export type PaperView = "1st" | "2nd" | "all";
+
+/**
+ * Subjects for a paper view.
+ *
+ * The stored profile still lists only the 1st Paper subjects, so 2nd Paper
+ * subjects are derived from them rather than requiring a data migration.
+ */
+export function useSubjectsForPaper(view: PaperView): Subject[] {
+  const subjects = useSelectedSubjects();
+  return useMemo(() => {
+    const wanted = new Set(
+      subjects.map((subject) =>
+        view === "2nd"
+          ? `${subject.id.replace(/-2nd$/, "")}-2nd`
+          : subject.id.replace(/-2nd$/, ""),
+      ),
+    );
+    return SYLLABUS.filter((subject) => wanted.has(subject.id));
+  }, [subjects, view]);
+}
+
+/** True when this subject (either paper) is part of the student's plan. */
+export function isSubjectTracked(
+  profile: StudentProfile | null,
+  subject: Subject,
+): boolean {
+  if (!profile) return false;
+  const base = subject.id.replace(/-2nd$/, "");
+  return profile.subjects.includes(subject.id) || profile.subjects.includes(base);
+}

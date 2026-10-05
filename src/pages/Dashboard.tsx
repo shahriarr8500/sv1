@@ -8,20 +8,20 @@ import { SubjectCard } from "@/components/student-os/SubjectCard";
 import { formatPrice } from "@/lib/student-os/catalog";
 import { formatBookingDate } from "@/lib/student-os/format";
 import {
+ calculateOverallProgress,
   calculateSubjectProgress,
   findFirstIncompleteItem,
   listRecentCompletions,
 } from "@/lib/student-os/progress";
 import { cn } from "@/lib/utils";
 import {
-  useOverallProgress,
-  useSelectedSubjects,
   useStudentOS,
+  useSubjectsForPaper,
 } from "@/state/student-os";
 import { useBookings } from "@/state/workspace";
 import { motion } from "framer-motion";
 import { CalendarCheck } from "lucide-react";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router";
 
 /**
@@ -31,8 +31,12 @@ import { Link } from "react-router";
  */
 export default function DashboardPage() {
   const { profile, completions } = useStudentOS();
-  const subjects = useSelectedSubjects();
-  const overall = useOverallProgress();
+  const [paper,, setPaper] = useState<PaperView>("1st");
+  const subjects = useSubjectsForPaper(paper);
+  const overall = useMemo(
+    () => calculateOverallProgress(subjects, completions),
+    [subjects, completions],
+  );
 
   const subjectSummaries = useMemo(
     () => subjects.map((subject) => calculateSubjectProgress(subject, completions)),
