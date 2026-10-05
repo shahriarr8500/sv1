@@ -34,6 +34,9 @@ const schema = defineSchema(
       // Student OS progress mirrored from the student's device so the admin
       // console can read (and correct) each account's dashboard state.
       progress: v.optional(v.any()),
+      /** Set when an admin bans this account. Banned users are signed out and
+       *  refused by the progress functions. */
+      bannedAt: v.optional(v.union(v.number(), v.null())),
     }).index("email", ["email"]), // index for the email. do not remove or modify
 
     // add other tables here

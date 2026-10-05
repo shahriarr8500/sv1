@@ -15,8 +15,9 @@ import { calculateSubjectProgress } from "@/lib/student-os/progress";
 import { formatItemCount, formatRelativeDay } from "@/lib/student-os/format";
 import { SYLLABUS } from "@/lib/student-os/syllabus";
 import type { StudentProfile, Subject } from "@/lib/student-os/types";
-import { useMutation, useQuery } from "convex/react";
+import { useAction, useMutation, useQuery } from "convex/react";
 import {
+  Ban,
   ChevronDown,
   ChevronUp,
   Loader2,
@@ -24,6 +25,7 @@ import {
   RotateCcw,
   Save,
   ShieldOff,
+  UserX,
   Users,
 } from "lucide-react";
 import { useState } from "react";
@@ -47,6 +49,7 @@ interface AdminUser {
   role: "admin" | "user" | "member";
   emailVerificationTime: number | null;
   isAnonymous: boolean;
+  bannedAt: number | null;
   progress: {
     profile: Record<string, unknown> | null;
     completions: Record<string, number>;
@@ -87,6 +90,8 @@ function UserCard({
   user: AdminUser;
   isSelf: boolean;
 }) {
+  const banUser = useAction(api.admin.banUser);
+  const deleteAccount = useAction(api.admin.deleteAccount);
   const updateUser = useMutation(api.admin.updateUser);
   const updateProgress = useMutation(api.admin.updateUserProgress);
   const navigate = useNavigate();
@@ -138,6 +143,11 @@ function UserCard({
             <span className="rounded-lg border px-1.5 py-0.5 text-[11px] text-muted-foreground">
               {user.role}
             </span>
+            {user.bannedAt !== null && (
+              <span className="rounded-lg bg-red-500/15 px-1.5 py-0.5 text-[11px] font-medium text-red-500">
+                Banned
+              </span>
+            )}
             {isSelf && (
               <span className="rounded-lg bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary">
                 You
@@ -227,6 +237,47 @@ function UserCard({
             >
               <LogIn className="mr-2 size-4" />
               Log in as this user
+            </Button>
+            <Button
+              variant="outline"
+              className="cursor-pointer"
+              disabled={isSaving || isSelf}
+              onClick={async () => {
+                setIsSaving(true);
+                await run(
+                  () =>
+                    banUser({
+                      userId: user.id,
+                      banned: user.bannedAt === null,
+                    }),
+                  user.bannedAt === null ? "Account banned" : "Account unbanned",
+                );
+              }}
+            >
+              <Ban className="mr-2 size-4" />
+              {user.bannedAt === null ? "Ban" : "Unban"}
+            </Button>
+            <Button
+              variant="outline"
+              className="cursor-pointer text-red-500 hover:text-red-500"
+              disabled={isSaving || isSelf}
+              onClick={() => {
+                if (
+                  !window.confirm(
+                    `Permanently delete ${user.name || user.email || "this account"}? This signs them out everywhere and cannot be undone.`,
+                  )
+                ) {
+                  return;
+                }
+                setIsSaving(true);
+                run(
+                  () => deleteAccount({ userId: user.id }),
+                  "Account deleted",
+                );
+              }}
+            >
+              <UserX className="mr-2 size-4" />
+              Delete
             </Button>
           </div>
 

@@ -1,9 +1,10 @@
-import { getAuthUserId } from "@convex-dev/auth/server";
+import { getAuthUserId, invalidateSessions } from "@convex-dev/auth/server";
 import type { GenericMutationCtx, GenericQueryCtx } from "convex/server";
 import { v } from "convex/values";
 import type { DataModel } from "./_generated/dataModel";
 import type { Doc, Id } from "./_generated/dataModel";
-import { mutation, query } from "./_generated/server";
+import { action, mutation, query } from "./_generated/server";
+import { api } from "./_generated/api";
 import { roleValidator, ROLES } from "./schema";
 
 /**
@@ -112,6 +113,7 @@ export const listUsers = query({
         role: user.role ?? ROLES.USER,
         emailVerificationTime: user.emailVerificationTime ?? null,
         isAnonymous: user.isAnonymous ?? false,
+        bannedAt: user.bannedAt ?? null,
         progress: readProgress(user),
       }))
       .sort(
@@ -179,6 +181,72 @@ export const updateUserProgress = mutation({
       updatedAt: Date.now(),
     };
     await ctx.db.patch(args.userId, { progress: next });
+    return { ok: true };
+  },
+});
+
+
+/* -------------------------------------------------------------------------- */
+/* Ban & delete                                                               */
+/* -------------------------------------------------------------------------- */
+
+/** Patches the banned flag. Internal: call through the `banUser` action. */
+export const setBannedInternal = mutation({
+  args: { userId: v.id("users"), banned: v.boolean() },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.userId, { bannedAt: args.banned ? Date.now() : null });
+    return { ok: true };
+  },
+});
+
+/** Deletes the account document. Internal: call through `deleteAccount`. */
+export const deleteUserInternal = mutation({
+  args: { userId: v.id("users") },
+  handler: async (ctx, args) => {
+    const target = await ctx.db.get(args.userId);
+    if (target === null) throw new Error("That account no longer exists.");
+    await ctx.db.delete(args.userId);
+    return { ok: true };
+  },
+});
+
+/**
+ * Bans or unbans an account.
+ *
+ * Banning also invalidates every Convex Auth session for that user, so a
+ * device holding a valid session cookie is signed out immediately rather than
+ * lingering until the cookie expires.
+ */
+export const banUser = action({
+  args: { userId: v.id("users"), banned: v.boolean() },
+  handler: async (ctx, args) => {
+    if ((await ctx.runQuery(api.admin.isAdmin)) !== true) {
+      throw new Error("Admin access required.");
+    }
+    if ((await getAuthUserId(ctx)) === args.userId) {
+      throw new Error("You cannot ban your own admin account.");
+    }
+    await invalidateSessions(ctx, { userId: args.userId });
+    await ctx.runMutation(api.admin.setBannedInternal, args);
+    return { ok: true };
+  },
+});
+
+/**
+ * Permanently deletes an account after signing it out everywhere. The email
+ * can then sign in again as a completely new account.
+ */
+export const deleteAccount = action({
+  args: { userId: v.id("users") },
+  handler: async (ctx, args) => {
+    if ((await ctx.runQuery(api.admin.isAdmin)) !== true) {
+      throw new Error("Admin access required.");
+    }
+    if ((await getAuthUserId(ctx)) === args.userId) {
+      throw new Error("You cannot delete your own admin account.");
+    }
+    await invalidateSessions(ctx, { userId: args.userId });
+    await ctx.runMutation(api.admin.deleteUserInternal, args);
     return { ok: true };
   },
 });
