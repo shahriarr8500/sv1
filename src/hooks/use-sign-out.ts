@@ -1,3 +1,4 @@
+import { clearStoredAccessPass } from "@/hooks/use-access-pass";
 import { useAuth } from "@/hooks/use-auth";
 import { useCallback } from "react";
 import { useNavigate } from "react-router";
@@ -11,6 +12,8 @@ export function useSignOut() {
     try {
       await signOut();
     } finally {
+      // Signing out also revokes the access pass on this browser.
+      clearStoredAccessPass();
       navigate("/");
     }
   }, [signOut, navigate]);

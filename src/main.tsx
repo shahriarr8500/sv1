@@ -1,5 +1,6 @@
 import '@vly-ai/integrations';
 import { Toaster } from "@/components/ui/sonner";
+import { RequireAccessPass } from "@/components/RequireAccessPass";
 import { RequireAuth } from "@/components/RequireAuth";
 import { AppShell } from "@/components/student-os/AppShell";
 import { StudentOSProvider } from "@/state/student-os";
@@ -17,6 +18,7 @@ import "./index.css";
 // Lazy load route components for better code splitting
 const Landing = lazy(() => import("./pages/Landing.tsx"));
 const AuthPage = lazy(() => import("./pages/Auth.tsx"));
+const AccessPass = lazy(() => import("./pages/AccessPass.tsx"));
 const Onboarding = lazy(() => import("./pages/Onboarding.tsx"));
 const Dashboard = lazy(() => import("./pages/Dashboard.tsx"));
 const Subject = lazy(() => import("./pages/Subject.tsx"));
@@ -152,13 +154,27 @@ createRoot(document.getElementById("root")!).render(
                   }
                 />
                 <Route
+                  path="/access-pass"
+                  element={
+                    <RequireAuth
+                      title="Sign in to unlock Student OS V1"
+                      description="The access pass is checked after you sign in."
+                      redirectImmediately
+                    >
+                      <AccessPass />
+                    </RequireAuth>
+                  }
+                />
+                <Route
                   path="/onboarding"
                   element={
                     <RequireAuth
                       title="Sign in to set up Student OS V1"
                       description="Your goal and syllabus progress are tied to your account."
                     >
-                      <Onboarding />
+                      <RequireAccessPass>
+                        <Onboarding />
+                      </RequireAccessPass>
                     </RequireAuth>
                   }
                 />
@@ -168,7 +184,9 @@ createRoot(document.getElementById("root")!).render(
                       title="Sign in to open Student OS V1"
                       description="Your dashboard, syllabus, and progress live behind sign-in."
                     >
-                      <AppShell />
+                      <RequireAccessPass>
+                        <AppShell />
+                      </RequireAccessPass>
                     </RequireAuth>
                   }
                 >
