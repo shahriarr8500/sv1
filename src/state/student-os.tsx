@@ -29,6 +29,8 @@ import type { ProgressSummary, StudentProfile, Subject } from "@/lib/student-os/
 interface StudentOSContextValue {
   profile: StudentProfile | null;
   completions: CompletionMap;
+  /** True while an impersonated account's state is still being fetched. */
+  isStateLoading: boolean;
   /** Used by onboarding (first save) and Settings → Goal (edits). */
   saveProfile: (profile: StudentProfile) => void;
   /** Check an item on or off; timestamp is recorded or cleared accordingly. */
@@ -55,8 +57,10 @@ export function StudentOSProvider({ children }: { children: ReactNode }) {
 
   // While an admin is signed in as somebody else, the state shown is the
   // target's — read from the server instead of this browser's storage, and
-  // never written back to it.
-  const impersonation = useQuery(api.impersonation.active, "skip");
+  // never written back to it. This query must not be skipped: skipping it
+  // leaves the provider on the admin's own state while the rest of the UI
+  // believes a session is open.
+  const impersonation = useQuery(api.impersonation.active);
   const isImpersonating = impersonation?.active === true;
   const targetState = useQuery(
     api.impersonation.targetState,
@@ -73,6 +77,9 @@ export function StudentOSProvider({ children }: { children: ReactNode }) {
       completions: targetState.completions ?? {},
     };
   }, [isImpersonating, localState, impersonatedEdits, targetState]);
+
+  /** True only while an impersonated account's state is still in flight. */
+  const isStateLoading = isImpersonating && targetState === undefined;
 
   /** Applies an update to whichever account is currently being viewed. */
   const updateState = useCallback(
@@ -137,10 +144,11 @@ export function StudentOSProvider({ children }: { children: ReactNode }) {
     () => ({
       profile: state.profile,
       completions: state.completions,
+      isStateLoading,
       saveProfile,
       toggleItem,
     }),
-    [state.profile, state.completions, saveProfile, toggleItem],
+    [state.profile, state.completions, isStateLoading, saveProfile, toggleItem],
   );
 
   return <StudentOSContext.Provider value={value}>{children}</StudentOSContext.Provider>;

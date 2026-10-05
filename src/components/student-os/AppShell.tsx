@@ -28,6 +28,7 @@ import {
   CalendarCheck,
   LayoutDashboard,
   LayoutGrid,
+  Loader2,
   LogOut,
   Menu,
   Settings,
@@ -238,7 +239,7 @@ function BrandMark() {
 }
 
 export function AppShell() {
-  const { profile, completions } = useStudentOS();
+  const { profile, completions, isStateLoading } = useStudentOS();
   const subjects = useSelectedSubjects();
   const location = useLocation();
   const [navOpen, setNavOpen] = useState(false);
@@ -256,6 +257,16 @@ export function AppShell() {
     }
     return map;
   }, [subjects, completions]);
+
+  // An impersonated account's dashboard is still loading — don't bounce to
+  // onboarding on a null profile that is only null for a moment.
+  if (isStateLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <Loader2 className="size-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
 
   if (!profile) return <Navigate to="/onboarding" replace />;
 
