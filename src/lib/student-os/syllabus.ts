@@ -28,10 +28,10 @@ const HIGHER_MATH_CHAPTER_TITLES = [
   "Vectors",
   "Straight Lines",
   "Circles",
-  "Permutations & &",
+  "Permutations & Combinations",
   "Trigonometric Ratios",
   "Compound Angles Trigonometric Ratios",
-  "Functionscles",
+  "Functions & Graphs",
   "Differentiation",
   "Integration",
 ];
@@ -230,7 +230,7 @@ function buildHigherMathematics(): Subject {
 }
 
 function buildBiology(): Subject {
-  const chapters = BIOLOGY_CHAPTER_PAGE_RANGES.map((ranges, index) => => {
+  const chapters = BIOLOGY_CHAPTER_PAGE_RANGES.map((ranges, index) => {
     const number = index + 1;
     const chId = chapterId("biology", number);
     return {
