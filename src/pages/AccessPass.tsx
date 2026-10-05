@@ -11,9 +11,9 @@ import { Input } from "@/components/ui/input";
 import logo from "@/assets/logo.svg";
 import { useAccessPass } from "@/hooks/use-access-pass";
 import { useAuth } from "@/hooks/use-auth";
-import { ArrowRight, KeyRound, Loader2, LogOut } from "lucide-react";
+import { ArrowRight, KeyRound, Loader2, LogOut, ShieldCheck } from "lucide-react";
 import { useState } from "react";
-import { Navigate, useNavigate, useSearchParams } from "react-router";
+import { Link, Navigate, useNavigate, useSearchParams } from "react-router";
 
 /**
  * Post-sign-in gate. Signed-in visitors land here first and must enter the
@@ -131,6 +131,12 @@ export default function AccessPass() {
             >
               <LogOut className="mr-2 size-4" />
               Sign out
+            </Button>
+            <Button variant="ghost" className="w-full" asChild>
+              <Link to="/admin-entry">
+                <ShieldCheck className="mr-2 size-4" />
+                Admin entry
+              </Link>
             </Button>
           </CardFooter>
         </form>

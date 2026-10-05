@@ -30,6 +30,10 @@ const schema = defineSchema(
       isAnonymous: v.optional(v.boolean()), // is the user anonymous. do not remove
 
       role: v.optional(roleValidator), // role of the user. do not remove
+
+      // Student OS progress mirrored from the student's device so the admin
+      // console can read (and correct) each account's dashboard state.
+      progress: v.optional(v.any()),
     }).index("email", ["email"]), // index for the email. do not remove or modify
 
     // add other tables here

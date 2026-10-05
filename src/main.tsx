@@ -19,6 +19,8 @@ import "./index.css";
 const Landing = lazy(() => import("./pages/Landing.tsx"));
 const AuthPage = lazy(() => import("./pages/Auth.tsx"));
 const AccessPass = lazy(() => import("./pages/AccessPass.tsx"));
+const AdminEntry = lazy(() => import("./pages/AdminEntry.tsx"));
+const AdminConsole = lazy(() => import("./pages/AdminConsole.tsx"));
 const Onboarding = lazy(() => import("./pages/Onboarding.tsx"));
 const Dashboard = lazy(() => import("./pages/Dashboard.tsx"));
 const Subject = lazy(() => import("./pages/Subject.tsx"));
@@ -162,6 +164,34 @@ createRoot(document.getElementById("root")!).render(
                       redirectImmediately
                     >
                       <AccessPass />
+                    </RequireAuth>
+                  }
+                />
+                <Route
+                  path="/admin-entry"
+                  element={
+                    <RequireAuth
+                      title="Sign in to use the admin entry"
+                      description="The admin console is only available to signed-in users."
+                      redirectImmediately
+                    >
+                      <RequireAccessPass>
+                        <AdminEntry />
+                      </RequireAccessPass>
+                    </RequireAuth>
+                  }
+                />
+                <Route
+                  path="/admin-console"
+                  element={
+                    <RequireAuth
+                      title="Sign in to open the admin console"
+                      description="Account management is only available to signed-in users."
+                      redirectImmediately
+                    >
+                      <RequireAccessPass>
+                        <AdminConsole />
+                      </RequireAccessPass>
                     </RequireAuth>
                   }
                 />

@@ -5,15 +5,18 @@
  * recent activity, and the dashboard instantly (no reloads).
  */
 
+import { useConvexAuth, useMutation } from "convex/react";
 import {
   createContext,
   useCallback,
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
+import { api } from "@/convex/_generated/api";
 import {
   calculateOverallProgress,
   calculateSubjectProgress,
@@ -34,13 +37,36 @@ interface StudentOSContextValue {
 
 const StudentOSContext = createContext<StudentOSContextValue | null>(null);
 
+/** How long progress changes are batched before being mirrored to Convex. */
+const SYNC_DEBOUNCE_MS = 2000;
+
 export function StudentOSProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<StudentOSState>(() => repository.load());
+  const { isAuthenticated } = useConvexAuth();
+  const syncProgress = useMutation(api.progress.syncMyProgress);
+  const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Persist on every change so progress survives refreshes.
   useEffect(() => {
     repository.save(state);
   }, [state]);
+
+  // Mirror this student's state onto their Convex account so the admin
+  // console can read it. Debounced, and a no-op while signed out.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+    syncTimerRef.current = setTimeout(() => {
+      syncProgress({ profile: state.profile, completions: state.completions }).catch(
+        (error) => {
+          console.warn("Progress sync failed:", error);
+        },
+      );
+    }, SYNC_DEBOUNCE_MS);
+    return () => {
+      if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+    };
+  }, [state, isAuthenticated, syncProgress]);
 
   const saveProfile = useCallback((profile: StudentProfile) => {
     setState((previous) => ({ ...previous, profile }));
