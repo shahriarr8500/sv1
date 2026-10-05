@@ -7,7 +7,7 @@
  * (or page range) only.
  */
 
-import type { Chapter, ItemLocation, StudyItem, Subject } from "./types";
+import type { Chapter, ItemLocation, PaperKey, StudyItem, Subject } from "./types";
 
 /** Default tracked subjects for the HSC PCMB setup. */
 export const PCMB_SUBJECT_IDS = ["physics", "chemistry", "mathematics", "biology"];
@@ -176,8 +176,11 @@ function finalizeSubject(
   paper: string,
   chapters: Chapter[],
 ): Subject {
+  const paperKey: PaperKey = paper.startsWith("2nd") ? "2nd" : "1st";
   return {
     id,
+    subjectKey: id.replace(/-2nd$/, ""),
+    paperKey,
     name,
     paper,
     chapters,
@@ -249,6 +252,10 @@ export const SYLLABUS: Subject[] = [
   buildChemistry(),
   buildHigherMathematics(),
   buildBiology(),
+  buildPhysics2nd(),
+  buildChemistry2nd(),
+  buildHigherMathematics2nd(),
+  buildBiology2nd(),
 ];
 
 const SUBJECT_BY_ID = new Map(SYLLABUS.map((subject) => [subject.id, subject]));

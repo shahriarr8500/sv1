@@ -6,6 +6,12 @@
  * their own, so new subjects/papers can be added without touching the UI.
  */
 
+/** Which HSC paper a subject belongs to. */
+export type PaperKey = "1st" | "2nd";
+
+/** Which HSC paper a subject belongs to. */
+export type PaperKey = "1st" | "2nd";
+
 /** A single trackable unit inside a chapter (numbered item, page range, or a whole chapter). */
 export interface StudyItem {
   /** Stable unique id — used as the completion key and as a DOM anchor. */
@@ -28,7 +34,12 @@ export interface Chapter {
 }
 
 export interface Subject {
+  /** Unique key within its paper (`physics`, `physics-2nd`). */
   id: string;
+  /** Base subject key shared by every paper (`physics`). */
+  subjectKey: string;
+  /** Which paper this subject belongs to. */
+  paperKey: PaperKey;
   name: string;
   /** e.g. "1st Paper" */
   paper: string;
