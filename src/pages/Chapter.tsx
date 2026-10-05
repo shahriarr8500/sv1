@@ -7,7 +7,7 @@ import {
 } from "@/lib/student-os/progress";
 import { getChapter, getSubject } from "@/lib/student-os/syllabus";
 import { cn } from "@/lib/utils";
-import { useStudentOS } from "@/state/student-os";
+import { isSubjectTracked, useStudentOS } from "@/state/student-os";
 import { motion } from "framer-motion";
 import { ArrowLeft } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -42,12 +42,7 @@ export default function ChapterPage() {
     };
   }, []);
 
-  if (
-    !subject ||
-    !chapter ||
-    !profile ||
-    !profile.subjects.includes(subject.id)
-  ) {
+  if (!subject || !chapter || !profile || !isSubjectTracked(profile, subject)) {
     return <Navigate to="/dashboard" replace />;
   }
 

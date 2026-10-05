@@ -393,6 +393,21 @@ for (const subject of SYLLABUS) {
   }
 }
 
+/**
+ * The same subject in the requested paper (`physics` <-> `physics-2nd`).
+ * Returns undefined when that paper has no version of the subject.
+ */
+export function getSiblingPaperSubject(
+  subject: Subject,
+  paperKey: PaperKey,
+): Subject | undefined {
+  return SYLLABUS.find(
+    (candidate) =>
+      candidate.subjectKey === subject.subjectKey &&
+      candidate.paperKey === paperKey,
+  );
+}
+
 export function getSubject(id: string | null | undefined): Subject | undefined {
   return id ? SUBJECT_BY_ID.get(id) : undefined;
 }

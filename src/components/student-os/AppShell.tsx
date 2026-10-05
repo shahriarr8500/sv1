@@ -18,11 +18,14 @@ import { useImpersonation } from "@/hooks/use-impersonation";
 import { useSignOut } from "@/hooks/use-sign-out";
 import { iconForSubject } from "@/components/student-os/subject-icons";
 import { goalHeadline } from "@/lib/student-os/format";
+import { getSiblingPaperSubject } from "@/lib/student-os/syllabus";
 import { calculateSubjectProgress } from "@/lib/student-os/progress";
+import type { Subject } from "@/lib/student-os/types";
 import { cn } from "@/lib/utils";
 import {
   useSelectedSubjects,
   useStudentOS,
+  useSubjectsForPaper,
 } from "@/state/student-os";
 import {
   CalendarCheck,
@@ -105,22 +108,51 @@ function SidebarNav({
         Syllabus
       </p>
       <ul className="space-y-1">
-        {subjects.map((subject) => (
-          <NavRow
-            key={subject.id}
-            onNavigate={onNavigate}
-            entry={{
-              to: `/syllabus/${subject.id}`,
-              label: subject.name,
-              icon: iconForSubject(subject.id),
-              trailing: (
-                <span className="text-[11px] font-medium tabular-nums opacity-70">
-                  {progressBySubject.get(subject.id) ?? 0}%
-                </span>
-              ),
-            }}
-          />
-        ))}
+        {subjects.map((subject) => {
+          const paperLinks = (["1st", "2nd"] as const)
+            .map((paperKey) => getSiblingPaperSubject(subject, paperKey))
+            .filter((target): target is Subject => Boolean(target));
+          return (
+            <li key={subject.id}>
+              <NavRow
+                onNavigate={onNavigate}
+                entry={{
+                  to: `/syllabus/${subject.id}`,
+                  label: subject.name,
+                  icon: iconForSubject(subject.id),
+                  trailing: (
+                    <span className="text-[11px] font-medium tabular-nums opacity-70">
+                      {progressBySubject.get(subject.id) ?? 0}%
+                    </span>
+                  ),
+                }}
+              />
+              <ul className="ml-6 mt-0.5 space-y-0.5 border-l pl-2">
+                {paperLinks.map((target) => (
+                  <li key={target.id}>
+                    <NavLink
+                      to={`/syllabus/${target.id}`}
+                      onClick={onNavigate}
+                      className={({ isActive }) =>
+                        cn(
+                          "flex cursor-pointer items-center justify-between rounded-md px-2 py-1 text-xs transition-colors",
+                          isActive
+                            ? "bg-primary/10 font-medium text-primary"
+                            : "text-muted-foreground hover:text-foreground",
+                        )
+                      }
+                    >
+                      <span>{target.paper}</span>
+                      <span className="tabular-nums opacity-70">
+                        {progressBySubject.get(target.id) ?? 0}%
+                      </span>
+                    </NavLink>
+                  </li>
+                ))}
+              </ul>
+            </li>
+          );
+        })}
       </ul>
 
       <ul className="mt-6 space-y-1">
@@ -241,6 +273,8 @@ function BrandMark() {
 export function AppShell() {
   const { profile, completions, isStateLoading } = useStudentOS();
   const subjects = useSelectedSubjects();
+  // Both papers, so the sidebar can show 1st/2nd progress per subject.
+  const paperSubjects = useSubjectsForPaper("all");
   const location = useLocation();
   const [navOpen, setNavOpen] = useState(false);
 
@@ -251,12 +285,12 @@ export function AppShell() {
 
   const progressBySubject = useMemo(() => {
     const map = new Map<string, number>();
-    for (const subject of subjects) {
+    for (const subject of paperSubjects) {
       const summary = calculateSubjectProgress(subject, completions);
       map.set(subject.id, summary.percent);
     }
     return map;
-  }, [subjects, completions]);
+  }, [paperSubjects, completions]);
 
   // An impersonated account's dashboard is still loading — don't bounce to
   // onboarding on a null profile that is only null for a moment.

@@ -56,11 +56,14 @@ export function itemLabel(item: StudyItem): string {
 }
 
 /** "Physics 1.1 completed" / "Higher Mathematics: Vectors completed". */
+/**
+ * Recent-progress label. Includes the paper because the same item number can
+ * exist in both papers, e.g. "Physics 2nd Paper - 1.4 completed".
+ */
 export function formatCompletionText(location: ItemLocation): string {
-  const { subject, item } = location;
-  return /^\d/.test(item.title)
-    ? `${subject.name} ${item.title} completed`
-    : `${subject.name}: ${item.title} completed`;
+  return `${location.subject.name} ${location.subject.paper} - ${itemLabel(
+    location.item,
+  )} completed`;
 }
 
 export function formatRelativeDay(timestamp: number): string {

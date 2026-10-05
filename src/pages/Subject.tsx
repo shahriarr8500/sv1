@@ -3,9 +3,13 @@ import { chapterTitle } from "@/lib/student-os/format";
 import {
   calculateChapterProgress,
 } from "@/lib/student-os/progress";
-import { getSubject } from "@/lib/student-os/syllabus";
+import { getSiblingPaperSubject, getSubject } from "@/lib/student-os/syllabus";
 import { cn } from "@/lib/utils";
-import { useSubjectProgress, useStudentOS } from "@/state/student-os";
+import {
+  isSubjectTracked,
+  useSubjectProgress,
+  useStudentOS,
+} from "@/state/student-os";
 import { motion } from "framer-motion";
 import { ArrowLeft, ChevronRight, CheckCircle2 } from "lucide-react";
 import { useMemo } from "react";
@@ -29,7 +33,7 @@ export default function SubjectPage() {
     [subject, completions],
   );
 
-  if (!subject || !profile || !profile.subjects.includes(subject.id)) {
+  if (!subject || !profile || !isSubjectTracked(profile, subject)) {
     return <Navigate to="/dashboard" replace />;
   }
 
@@ -48,6 +52,28 @@ export default function SubjectPage() {
           <ArrowLeft className="size-4" aria-hidden />
           Dashboard
         </Link>
+
+        <nav aria-label="Paper" className="inline-flex gap-1 rounded-xl border bg-card p-1">
+          {(["1st", "2nd"] as const).map((paperKey) => {
+            const target = getSiblingPaperSubject(subject, paperKey);
+            if (!target) return null;
+            const active = subject.paperKey === paperKey;
+            return (
+              <Link
+                key={paperKey}
+                to={`/syllabus/${target.id}`}
+                className={cn(
+                  "cursor-pointer rounded-lg px-4 py-1.5 text-sm font-medium transition-colors",
+                  active
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {target.paper}
+              </Link>
+            );
+          })}
+        </nav>
 
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div className="space-y-1.5">
