@@ -232,7 +232,7 @@ function BrandMark() {
       to="/"
       className="flex cursor-pointer items-center gap-2.5 transition-opacity hover:opacity-80"
     >
-      <StudentOsLogo className="size-6" strokeWidth={18} />
+      <StudentOsLogo className="size-6 rounded-md" />
       <span className="text-sm font-bold tracking-tight">Student OS V1</span>
     </Link>
   );

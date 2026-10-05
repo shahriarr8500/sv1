@@ -225,7 +225,7 @@ export default function OnboardingPage() {
       case "welcome":
         return (
           <div className="flex flex-col items-center py-6 text-center">
-            <StudentOsLogo className="size-6" strokeWidth={18} />
+            <StudentOsLogo className="size-6 rounded-md" />
             <h1 className="mt-7 text-3xl font-bold tracking-tight sm:text-4xl">
               Welcome to Student OS V1
             </h1>
@@ -351,7 +351,7 @@ export default function OnboardingPage() {
             to="/"
             className="flex cursor-pointer items-center gap-2.5 transition-opacity hover:opacity-80"
           >
-            <StudentOsLogo className="size-6" strokeWidth={18} />
+            <StudentOsLogo className="size-6 rounded-md" />
             <span className="text-sm font-bold tracking-tight">Student OS V1</span>
           </Link>
           {stepIndex > 0 ? (

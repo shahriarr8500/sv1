@@ -102,7 +102,7 @@ export default function Landing() {
             to="/"
             className="flex cursor-pointer items-center gap-2.5 transition-opacity hover:opacity-80"
           >
-            <StudentOsLogo className="size-6" strokeWidth={18} />
+            <StudentOsLogo className="size-6 rounded-md" />
             <span className="text-sm font-bold tracking-tight">Student OS V1</span>
           </Link>
 
@@ -475,7 +475,7 @@ export default function Landing() {
       <footer className="border-t">
         <div className="mx-auto flex max-w-6xl flex-col gap-4 px-4 py-8 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
           <div className="flex items-center gap-2.5">
-            <StudentOsLogo className="size-6" strokeWidth={18} />
+            <StudentOsLogo className="size-6 rounded-md" />
             <span className="text-sm font-bold tracking-tight">Student OS V1</span>
             <span className="text-xs text-muted-foreground">Foundation</span>
           </div>

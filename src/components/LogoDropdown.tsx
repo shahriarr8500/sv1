@@ -34,7 +34,7 @@ export function LogoDropdown() {
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" size="icon" className="h-10 w-10">
-          <StudentOsLogo className="size-6" strokeWidth={18} />
+          <StudentOsLogo className="size-6 rounded-md" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-48">
