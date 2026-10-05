@@ -1,7 +1,7 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 import { resolveWriteTarget } from "./impersonation";
-import { mutation } from "./_generated/server";
+import { mutation, query } from "./_generated/server";
 
 /**
  * Per-user progress mirroring.
@@ -30,5 +30,28 @@ export const syncMyProgress = mutation({
       },
     });
     return { ok: true };
+  },
+});
+/**
+ * The caller's own mirrored progress, so a device that has never used the app
+ * (new phone, cleared browser) can hydrate from the account instead of
+ * starting empty. Returns null when the account has never synced.
+ */
+export const myProgress = query({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) return null;
+    const user = await ctx.db.get(userId);
+    const raw = user?.progress as
+      | { profile?: unknown; completions?: Record<string, number>; updatedAt?: number }
+      | undefined;
+    if (!raw) return null;
+    return {
+      profile: (raw.profile ?? null) as Record<string, unknown> | null,
+      completions:
+        raw.completions && typeof raw.completions === "object" ? raw.completions : {},
+      updatedAt: typeof raw.updatedAt === "number" ? raw.updatedAt : 0,
+    };
   },
 });

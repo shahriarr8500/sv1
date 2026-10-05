@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import {
   useStudentOS,
   useSubjectsForPaper,
+  type PaperView,
 } from "@/state/student-os";
 import { useBookings } from "@/state/workspace";
 import { motion } from "framer-motion";
@@ -31,7 +32,7 @@ import { Link } from "react-router";
  */
 export default function DashboardPage() {
   const { profile, completions } = useStudentOS();
-  const [paper,, setPaper] = useState<PaperView>("1st");
+  const [paper, setPaper] = useState<PaperView>("1st");
   const subjects = useSubjectsForPaper(paper);
   const overall = useMemo(
     () => calculateOverallProgress(subjects, completions),

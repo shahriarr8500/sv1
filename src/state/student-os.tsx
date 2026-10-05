@@ -55,6 +55,8 @@ export function StudentOSProvider({ children }: { children: ReactNode }) {
   const syncProgress = useMutation(api.progress.syncMyProgress);
   const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+
+
   // While an admin is signed in as somebody else, the state shown is the
   // target's — read from the server instead of this browser's storage, and
   // never written back to it. This query must not be skipped: skipping it
@@ -62,6 +64,33 @@ export function StudentOSProvider({ children }: { children: ReactNode }) {
   // believes a session is open.
   const impersonation = useQuery(api.impersonation.active);
   const isImpersonating = impersonation?.active === true;
+
+  // A device that has never used the app (new phone, cleared browser) starts
+  // with empty local state. Hydrate it from the account so the same student
+  // sees the same progress on every device. It only fills an empty local
+  // state, so progress already recorded on this device is never overwritten.
+  const serverProgress = useQuery(
+    api.progress.myProgress,
+    isAuthenticated && !isImpersonating ? {} : "skip",
+  );
+  const hydratedRef = useRef(false);
+  useEffect(() => {
+    if (hydratedRef.current || !isAuthenticated || isImpersonating) return;
+    if (
+      localState.profile !== null ||
+      Object.keys(localState.completions).length > 0
+    ) {
+      hydratedRef.current = true;
+      return;
+    }
+    if (serverProgress === undefined || serverProgress === null) return;
+    hydratedRef.current = true;
+    setLocalState({
+      version: 1,
+      profile: (serverProgress.profile as StudentProfile | null) ?? null,
+      completions: serverProgress.completions,
+    });
+  }, [isAuthenticated, isImpersonating, localState, serverProgress]);
   const targetState = useQuery(
     api.impersonation.targetState,
     isImpersonating ? {} : "skip",
