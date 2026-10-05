@@ -14,7 +14,7 @@ import { useImpersonation } from "@/hooks/use-impersonation";
 import { calculateSubjectProgress } from "@/lib/student-os/progress";
 import { formatItemCount, formatRelativeDay } from "@/lib/student-os/format";
 import { SYLLABUS } from "@/lib/student-os/syllabus";
-import type { StudentProfile } from "@/lib/student-os/types";
+import type { StudentProfile, Subject } from "@/lib/student-os/types";
 import { useMutation, useQuery } from "convex/react";
 import {
   ChevronDown,
@@ -70,6 +70,14 @@ function readProfile(progress: AdminUser["progress"]): StudentProfile | null {
       (id): id is string => typeof id === "string",
     ),
   };
+}
+
+/** Only the subjects this account actually tracks (the catalog also holds the
+ *  2nd Paper, which the stored profile does not list). */
+function trackableSubjects(profile: StudentProfile): Subject[] {
+  return SYLLABUS.filter((subject) =>
+    profile.subjects.includes(subject.id),
+  );
 }
 
 function UserCard({
@@ -305,7 +313,7 @@ function UserCard({
                   ))}
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {SYLLABUS.map((subject) => {
+                  {trackableSubjects(profile).map((subject) => {
                     const checked = profile.subjects.includes(subject.id);
                     return (
                       <button
