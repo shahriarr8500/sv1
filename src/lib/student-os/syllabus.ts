@@ -243,12 +243,134 @@ function buildBiology(): Subject {
   return finalizeSubject("biology", "Biology", "1st Paper", chapters);
 }
 
+/* -------------------------------------------------------------------------- */
+/* PCMB 2nd Paper                                                            */
+/* -------------------------------------------------------------------------- */
+
+/** Physics 2nd Paper: item counts per chapter (11 chapters, 101 items). */
+const PHYSICS_2ND_ITEM_COUNTS = [10, 18, 12, 11, 5, 13, 6, 9, 9, 5, 3];
+
+/** Biology 2nd Paper: item counts per chapter (12 chapters). */
+const BIOLOGY_2ND_ITEM_COUNTS = [3, 8, 9, 8, 8, 6, 9, 5, 8, 7, 9, 6];
+
+/**
+ * Chemistry 2nd Paper, exactly as supplied: chapter 2 is numbered 2.0-2.23
+ * (2.0 is a real, trackable item) and chapter 5 is numbered 4.1-4.17 rather
+ * than 5.1-5.17. Both are preserved verbatim.
+ */
+const CHEMISTRY_2ND_RANGES = [
+  { start: 1, end: 23 },
+  { start: 0, end: 23 },
+  { start: 1, end: 19 },
+  { start: 1, end: 19 },
+  { start: 1, end: 17, numberOverride: 4 },
+];
+
+/** Items numbered across an explicit range, e.g. 2.0 through 2.23. */
+function rangeItems(
+  subjectId: string,
+  chId: string,
+  chapterNumber: number,
+  from: number,
+  to: number,
+): StudyItem[] {
+  const items: StudyItem[] = [];
+  for (let n = from; n <= to; n++) {
+    const itemNumber = `${chapterNumber}.${n}`;
+    items.push({
+      id: `${chId}-${itemNumber}`,
+      subjectId,
+      chapterId: chId,
+      itemNumber,
+      title: itemNumber,
+    });
+  }
+  return items;
+}
+
+function buildPhysics2nd(): Subject {
+  const subjectId = "physics-2nd";
+  const chapters = PHYSICS_2ND_ITEM_COUNTS.map((count, index) => {
+    const number = index + 1;
+    const chId = chapterId(subjectId, number);
+    return {
+      id: chId,
+      subjectId,
+      number,
+      items: numberedItems(subjectId, chId, number, count),
+    };
+  });
+  return finalizeSubject(subjectId, "Physics", "2nd Paper", chapters);
+}
+
+function buildChemistry2nd(): Subject {
+  const subjectId = "chemistry-2nd";
+  const chapters = CHEMISTRY_2ND_RANGES.map((entry, index) => {
+    const number = index + 1;
+    const chId = chapterId(subjectId, number);
+      return {
+      id: chId,
+      subjectId,
+      number,
+      items: rangeItems(
+        subjectId,
+        chId,
+        entry.numberOverride ?? number,
+             entry.start,
+        entry.end,
+      ),
+    };
+  });
+  return finalizeSubject(subjectId, "Chemistry", "2nd Paper", chapters);
+}
+
+function buildHigherMathematics2nd(): Subject {
+  const subjectId = "mathematics-2nd";
+  // The supplied data gives chapter-level information only, so no chapter
+  // names or subsection topics are invented: each chapter is one item.
+  const chapters = HIGHER_MATH_CHAPTER_TITLES.map((_title, index) => {
+    const number = index + 1;
+    const chId = chapterId(subjectId, number);
+    return {
+      id: chId,
+      subjectId,
+      number,
+      items: chapterLevelItems(subjectId, chId, number, String(number)),
+    };
+  });
+  return finalizeSubject(
+    subjectId,
+    "Higher Mathematics",
+    "2nd Paper",
+    chapters,
+  );
+}
+
+function buildBiology2nd(): Subject {
+  const subjectId = "biology-2nd";
+  const chapters = BIOLOGY_2ND_ITEM_COUNTS.map((count, index) => {
+    const number = index + 1;
+    const chId = chapterId(subjectId, number);
+    return {
+      id: chId,
+      subjectId,
+      number,
+      items: numberedItems(subjectId, chId, number, count),
+    };
+  });
+  return finalizeSubject(subjectId, "Biology", "2nd Paper", chapters);
+}
+
 /** The syllabus catalog. All subjects in the app come from this list. */
 export const SYLLABUS: Subject[] = [
   buildPhysics(),
   buildChemistry(),
   buildHigherMathematics(),
   buildBiology(),
+  buildPhysics2nd(),
+  buildChemistry2nd(),
+  buildHigherMathematics2nd(),
+  buildBiology2nd(),
 ];
 
 const SUBJECT_BY_ID = new Map(SYLLABUS.map((subject) => [subject.id, subject]));
