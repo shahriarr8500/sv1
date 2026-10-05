@@ -25,6 +25,47 @@ import { CalendarCheck } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link } from "react-router";
 
+const PAPER_TABS: Array<{ value: PaperView; label: string }> = [
+  { value: "1st", label: "1st Paper" },
+  { value: "2nd", label: "2nd Paper" },
+  { value: "all", label: "All Papers" },
+];
+
+/** Segmented control for switching which paper the dashboard summarises. */
+function PaperSelector({
+  value,
+  onChange,
+}: {
+  value: PaperView;
+  onChange: (next: PaperView) => void;
+}) {
+  return (
+    <div
+      role="tablist"
+      aria-label="Paper"
+      className="inline-flex flex-wrap gap-1 rounded-xl border bg-card p-1"
+    >
+      {PAPER_TABS.map((tab) => (
+        <button
+          key={tab.value}
+          type="button"
+          role="tab"
+          aria-selected={value === tab.value}
+          onClick={() => onChange(tab.value)}
+          className={cn(
+            "cursor-pointer rounded-lg px-4 py-1.5 text-sm font-medium transition-colors",
+            value === tab.value
+              ? "bg-primary text-primary-foreground"
+              : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          {tab.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /**
  * Dashboard — the Student OS home screen, in priority order:
  *   1. Your goal → 2. Overall progress → 3. Subject progress
@@ -63,6 +104,8 @@ export default function DashboardPage() {
   return (
     <div className="space-y-8">
       <GoalHeader profile={profile} />
+
+      <PaperSelector value={paper} onChange={setPaper} />
 
       <OverallProgressCard summary={overall} subjects={subjects} />
 

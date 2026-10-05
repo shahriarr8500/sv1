@@ -73,24 +73,27 @@ export function StudentOSProvider({ children }: { children: ReactNode }) {
     api.progress.myProgress,
     isAuthenticated && !isImpersonating ? {} : "skip",
   );
-  const hydratedRef = useRef(false);
-  useEffect(() => {
-    if (hydratedRef.current || !isAuthenticated || isImpersonating) return;
-    if (
-      localState.profile !== null ||
-      Object.keys(localState.completions).length > 0
-    ) {
-      hydratedRef.current = true;
-      return;
-    }
-    if (serverProgress === undefined || serverProgress === null) return;
-    hydratedRef.current = true;
+  // Adjusting state during render (React's documented alternative to doing it
+  // inside an effect): a device that has never used the app fills its empty
+  // local state from the account exactly once. It never overwrites progress
+  // already recorded on this device.
+  const [hydrated, setHydrated] = useState(false);
+  const shouldHydrate =
+    !hydrated &&
+    isAuthenticated &&
+    !isImpersonating &&
+    serverProgress !== undefined &&
+    serverProgress !== null &&
+    localState.profile === null &&
+    Object.keys(localState.completions).length === 0;
+  if (shouldHydrate) {
+    setHydrated(true);
     setLocalState({
       version: 1,
       profile: (serverProgress.profile as StudentProfile | null) ?? null,
       completions: serverProgress.completions,
     });
-  }, [isAuthenticated, isImpersonating, localState, serverProgress]);
+  }
   const targetState = useQuery(
     api.impersonation.targetState,
     isImpersonating ? {} : "skip",
