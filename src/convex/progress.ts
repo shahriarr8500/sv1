@@ -1,7 +1,28 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
+import type { GenericMutationCtx, GenericQueryCtx } from "convex/server";
+import type { DataModel, Doc, Id } from "./_generated/dataModel";
 import { resolveWriteTarget } from "./impersonation";
 import { mutation, query } from "./_generated/server";
+
+/**
+ * Returns the caller, or throws when the account has been banned.
+ *
+ * Convex Auth owns the sign-in flow itself, so a ban is enforced here instead:
+ * every function that touches a student's own data refuses banned accounts.
+ */
+async function requireActiveUser(
+  ctx: GenericQueryCtx<DataModel> | GenericMutationCtx<DataModel>,
+): Promise<Id<"users">> {
+  const userId = await getAuthUserId(ctx);
+  if (userId === null) throw new Error("Not signed in.");
+  const user = await ctx.db.get(userId);
+  if (user === null) throw new Error("This account no longer exists.");
+  if (user.bannedAt) {
+    throw new Error("This account has been suspended. Contact an admin.");
+  }
+  return userId;
+}
 
 /**
  * Per-user progress mirroring.
@@ -18,8 +39,7 @@ export const syncMyProgress = mutation({
     completions: v.record(v.string(), v.number()),
   },
   handler: async (ctx, args) => {
-    const callerId = await getAuthUserId(ctx);
-    if (callerId === null) throw new Error("Not signed in.");
+    const callerId = await requireActiveUser(ctx);
 
     const targetId = await resolveWriteTarget(ctx, callerId);
     await ctx.db.patch(targetId, {
@@ -40,9 +60,15 @@ export const syncMyProgress = mutation({
 export const myProgress = query({
   args: {},
   handler: async (ctx) => {
-    const userId = await getAuthUserId(ctx);
-    if (userId === null) return null;
-    const user = await ctx.db.get(userId);
+    let userId: Id<"users"> | null;
+    let user: Doc<"users"> | null;
+    try {
+      userId = await requireActiveUser(ctx);
+      user = await ctx.db.get(userId);
+    } catch {
+      // A banned or removed account simply has nothing to hydrate from.
+      return null;
+    }
     const raw = user?.progress as
       | { profile?: unknown; completions?: Record<string, number>; updatedAt?: number }
       | undefined;

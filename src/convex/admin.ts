@@ -199,14 +199,87 @@ export const setBannedInternal = mutation({
   },
 });
 
-/** Deletes the account document. Internal: call through `deleteAccount`. */
-export const deleteUserInternal = mutation({
+/**
+ * Erases every trace of an account so the same email can sign up again from
+ * scratch. Internal: call through the `deleteAccount` action.
+ *
+ * Deleting only the user document is not enough. Convex Auth re-links an email
+ * through its `authAccounts` row, not through the user document, so a surviving
+ * row makes the next sign-in attempt patch a user that no longer exists and
+ * fail with a server error instead of creating a fresh account.
+ *
+ * Sessions and refresh tokens are already removed by `invalidateSessions`
+ * before this runs, so only the account link, its verification codes and the
+ * audit trail are left to clear here.
+ */
+export const purgeUserInternal = mutation({
   args: { userId: v.id("users") },
   handler: async (ctx, args) => {
     const target = await ctx.db.get(args.userId);
     if (target === null) throw new Error("That account no longer exists.");
+
+    // Drop the login links, plus any one-time codes still attached to them.
+    const accounts = await ctx.db
+      .query("authAccounts")
+      .withIndex("userIdAndProvider", (q) => q.eq("userId", args.userId))
+      .collect();
+    for (const account of accounts) {
+      const codes = await ctx.db
+        .query("authVerificationCodes")
+        .withIndex("accountId", (q) => q.eq("accountId", account._id))
+        .collect();
+      for (const code of codes) {
+        await ctx.db.delete(code._id);
+      }
+      await ctx.db.delete(account._id);
+    }
+
+    // Close out any "log in as" session that was pointed at this account, so
+    // the audit trail does not keep claiming someone entered a deleted user.
+    const auditTrail = await ctx.db.query("impersonations").collect();
+    for (const entry of auditTrail) {
+      if (entry.targetUserId === args.userId && entry.active) {
+        await ctx.db.patch(entry._id, { active: false, endedAt: Date.now() });
+      }
+    }
+
     await ctx.db.delete(args.userId);
     return { ok: true };
+  },
+});
+
+/**
+ * Deletes `authAccounts` rows whose user document is missing.
+ *
+ * Accounts deleted before this cleanup existed leave their login row behind,
+ * which locks that email out of signing in again for good: the sign-in attempt
+ * fails with a server error and can never recover. This sweep removes those
+ * leftovers so the affected emails can register normally.
+ *
+ * Internal: call through the `repairOrphanAccounts` action.
+ */
+export const repairOrphanAccountsInternal = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const accounts = await ctx.db.query("authAccounts").collect();
+    const repaired: string[] = [];
+
+    for (const account of accounts) {
+      const owner = await ctx.db.get(account.userId);
+      if (owner !== null) continue;
+
+      const codes = await ctx.db
+        .query("authVerificationCodes")
+        .withIndex("accountId", (q) => q.eq("accountId", account._id))
+        .collect();
+      for (const code of codes) {
+        await ctx.db.delete(code._id);
+      }
+      await ctx.db.delete(account._id);
+      repaired.push(account.providerAccountId || "unknown");
+    }
+
+    return { repaired };
   },
 });
 
@@ -233,8 +306,9 @@ export const banUser = action({
 });
 
 /**
- * Permanently deletes an account after signing it out everywhere. The email
- * can then sign in again as a completely new account.
+ * Permanently deletes an account after signing it out everywhere, removing the
+ * login link along with it so the email can sign up again as a brand new
+ * account.
  */
 export const deleteAccount = action({
   args: { userId: v.id("users") },
@@ -246,7 +320,24 @@ export const deleteAccount = action({
       throw new Error("You cannot delete your own admin account.");
     }
     await invalidateSessions(ctx, { userId: args.userId });
-    await ctx.runMutation(api.admin.deleteUserInternal, args);
+    await ctx.runMutation(api.admin.purgeUserInternal, args);
     return { ok: true };
+  },
+});
+
+/**
+ * Clears out leftover login rows from accounts that were deleted before the
+ * purge existed. Safe to run at any time; it only touches accounts whose user
+ * document is already gone.
+ */
+export const repairOrphanAccounts = action({
+  args: {},
+  // The return type is stated explicitly because the inferred one would depend
+  // on this action's own generated api entry.
+  handler: async (ctx): Promise<{ repaired: string[] }> => {
+    if ((await ctx.runQuery(api.admin.isAdmin)) !== true) {
+      throw new Error("Admin access required.");
+    }
+    return await ctx.runMutation(api.admin.repairOrphanAccountsInternal, {});
   },
 });
