@@ -76,8 +76,17 @@ export function createWeeklyTarget(
   };
 }
 
+/**
+ * Every mission planned for today, completed or not.
+ *
+ * Completed missions must stay in this list: the dashboard shows them
+ * checked, counts them toward "3 / 5", and a Perfect Day is only detectable
+ * when finished missions are still present.
+ */
 export function todayTargets(targets: Target[]): Target[] {
-  return targets.filter((t) => t.period === "daily" && t.targetDate === todayKey() && !t.completed);
+  return targets.filter(
+    (t) => t.period === "daily" && t.targetDate === todayKey(),
+  );
 }
 
 export function weekTargetsFor(targets: Target[], weekStart: string): Target[] {

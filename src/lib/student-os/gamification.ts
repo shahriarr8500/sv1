@@ -1,10 +1,11 @@
 /**
  * Gamification — XP, levels, streaks and achievements.
  *
- * Everything here derives from, or is led by, real stored activity:
- *   - XP is only ever added by `awardTargetXp` / `awardSessionXp`, both
- *     idempotent (keyed by target id / session id), so toggling a mission on
- *     and off can never farm XP.
+ * Everything here derives from real stored activity:
+ *   - XP is *recomputed* from the records (see `totalXp`), never kept as an
+ *     accumulator. Completing a mission adds its reward, unchecking removes
+ *     it, and toggling repeatedly nets zero because there is no ledger to
+ *     farm.
  *   - Streaks are computed from recorded study sessions, never from merely
  *     opening the app.
  *   - Achievements are derived from those same records — never stored as a
@@ -19,18 +20,23 @@ import type { StudySession } from "./study-log";
 
 export const GAMIFICATION_KEY = "student-os:gamification:v1";
 
+/**
+ * Derived snapshot of the gamification figures.
+ *
+ * The authoritative XP total is *recomputed* from the target and session
+ * records on every render — this record is only a cached copy of that
+ * derived value, kept in its own versioned namespace so it can never be
+ * mistaken for the source of truth. See `totalXp`.
+ */
 export interface GamificationState {
   version: 1;
-  /** Total XP ever earned. Monotonically increasing. */
   xp: number;
-  /** Target ids that have already paid out — blocks toggle farming. */
-  awardedTargetIds: string[];
-  /** Study session ids that have already paid out — blocks double awards. */
-  awardedSessionIds: string[];
+  level: number;
+  updatedAt: number;
 }
 
 export function emptyGamification(): GamificationState {
-  return { version: 1, xp: 0, awardedTargetIds: [], awardedSessionIds: [] };
+  return { version: 1, xp: 0, level: 1, updatedAt: 0 };
 }
 
 export function loadGamification(): GamificationState {
@@ -40,13 +46,9 @@ export function loadGamification(): GamificationState {
     const parsed = JSON.parse(raw) as Partial<GamificationState>;
     return {
       version: 1,
-      xp: typeof parsed.xp === "number" && Number.isFinite(parsed.xp) && parsed.xp >= 0 ? parsed.xp : 0,
-      awardedTargetIds: Array.isArray(parsed.awardedTargetIds)
-        ? parsed.awardedTargetIds.filter((id): id is string => typeof id === "string")
-        : [],
-      awardedSessionIds: Array.isArray(parsed.awardedSessionIds)
-        ? parsed.awardedSessionIds.filter((id): id is string => typeof id === "string")
-        : [],
+      xp: typeof parsed.xp === "number" && Number.isFinite(parsed.xp) && parsed.xp >= 0 ? Math.floor(parsed.xp) : 0,
+      level: typeof parsed.level === "number" && parsed.level >= 1 ? Math.floor(parsed.level) : 1,
+      updatedAt: typeof parsed.updatedAt === "number" ? parsed.updatedAt : 0,
     };
   } catch {
     return emptyGamification();
@@ -59,6 +61,54 @@ export function saveGamification(state: GamificationState): void {
   } catch {
     // Storage full or blocked (private mode) — keep working in memory.
   }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Derivation — XP is always recomputed, never accumulated                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * XP currently held by completed missions.
+ *
+ * Because this is derived from `completed` rather than a running total,
+ * checking a mission adds its XP and unchecking removes it — while toggling
+ * repeatedly can never accumulate anything, since there is no ledger to farm.
+ */
+export function totalTargetXp(targets: readonly Target[]): number {
+  let total = 0;
+  for (const target of targets) {
+    if (!target.completed) continue;
+    total += Number.isFinite(target.xp) && target.xp > 0 ? target.xp : BASE_MISSION_XP;
+  }
+  return total;
+}
+
+/** XP held by recorded study sessions — each session counted exactly once. */
+export function totalSessionXp(sessions: readonly StudySession[]): number {
+  let total = 0;
+  for (const session of sessions) {
+    if (session.mode !== "study") continue;
+    total += xpForStudySession(session.durationSeconds);
+  }
+  return total;
+}
+
+/** Total XP: completed missions + recorded study. */
+export function totalXp(
+  targets: readonly Target[],
+  sessions: readonly StudySession[],
+): number {
+  return totalTargetXp(targets) + totalSessionXp(sessions);
+}
+
+/** XP earned by missions completed on a given local day key. */
+export function todayTargetXp(targets: readonly Target[], dayKey: string): number {
+  let total = 0;
+  for (const target of targets) {
+    if (!target.completed || target.targetDate !== dayKey) continue;
+    total += Number.isFinite(target.xp) && target.xp > 0 ? target.xp : BASE_MISSION_XP;
+  }
+  return total;
 }
 
 /* -------------------------------------------------------------------------- */

@@ -1,13 +1,15 @@
 /**
  * Mission actions — the one place a "check a mission" click is turned into its
- * three side effects, in the right order and with the right guards:
+ * side effects:
  *
  *   1. mark the target complete;
- *   2. complete the syllabus item *only if it is not already complete*;
- *   3. award the mission's XP once (idempotent inside GamificationProvider).
+ *   2. complete the syllabus item *only if it is not already complete*.
  *
- * Unchecking reverses only step 1. The syllabus is never reverted and XP is
- * never subtracted, so toggling a mission repeatedly cannot farm anything.
+ * XP needs no action here: `GamificationProvider` derives it from the set of
+ * currently-completed missions, so checking adds the reward and unchecking
+ * takes it back automatically. Toggling repeatedly therefore nets zero.
+ *
+ * Unchecking reverses only step 1 — the syllabus is never reverted.
  */
 
 import { useCallback } from "react";
@@ -15,7 +17,6 @@ import type { Target } from "@/lib/student-os/target-model";
 import { isSyllabusItemComplete } from "@/lib/student-os/target-syllabus-integration";
 import { useStudentOS } from "@/state/student-os";
 import { useTargets } from "@/state/targets";
-import { useGamification } from "@/state/gamification";
 
 export interface MissionActions {
   completeMission: (target: Target) => void;
@@ -26,7 +27,6 @@ export interface MissionActions {
 
 export function useMissionActions(): MissionActions {
   const { setCompleted, removeMission } = useTargets();
-  const { awardTargetXp } = useGamification();
   const { completions, toggleItem } = useStudentOS();
 
   const completeMission = useCallback(
@@ -35,14 +35,14 @@ export function useMissionActions(): MissionActions {
       if (!isSyllabusItemComplete(target.syllabusItemId, completions)) {
         toggleItem(target.syllabusItemId, true);
       }
-      awardTargetXp(target);
     },
-    [setCompleted, completions, toggleItem, awardTargetXp],
+    [setCompleted, completions, toggleItem],
   );
 
   const uncompleteMission = useCallback(
     (target: Target) => {
-      // Only the target flag moves. No syllabus revert, no XP refund.
+      // Only the target flag moves. The syllabus stays complete, and the
+      // mission's XP drops back out because totals are derived from this flag.
       setCompleted(target.id, false);
     },
     [setCompleted],

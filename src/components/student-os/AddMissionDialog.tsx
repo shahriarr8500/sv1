@@ -5,9 +5,15 @@
  * Item), multi-selects items, and adds them as missions for that date.
  * Anything already planned on the selected date is marked "planned" and
  * cannot be added twice.
+ *
+ * Planned rows are still live mission checkboxes rather than dead ends:
+ * ticking one completes the mission and pays its XP, unticking it takes the
+ * XP back out. XP is derived from completion, so nothing is ever lost or
+ * double-counted by toggling.
  */
 
 import { useMemo, useState } from "react";
+import { toast } from "sonner";
 import { ChevronRight, Plus, Search, Target, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -24,6 +30,7 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { xpForSubject } from "@/lib/student-os/gamification";
 import type { Chapter, Subject, StudyItem } from "@/lib/student-os/types";
+import { useMissionActions } from "@/state/missions";
 import { useSelectedSubjects } from "@/state/student-os";
 import { useTargets } from "@/state/targets";
 
@@ -57,7 +64,8 @@ export function AddMissionDialog({
   defaultDate?: string;
 }) {
   const subjects = useSelectedSubjects();
-  const { isPlanned, addMissions } = useTargets();
+  const { isPlanned, addMissions, targets } = useTargets();
+  const { toggleMission } = useMissionActions();
 
   const [date, setDate] = useState(defaultDate ?? localTodayKey());
   const [query, setQuery] = useState("");
@@ -145,6 +153,15 @@ export function AddMissionDialog({
     );
   };
 
+  /** The live target record for a syllabus item on the selected date. */
+  const plannedTarget = (itemId: string) =>
+    targets.find(
+      (target) =>
+        target.period === "daily" &&
+        target.targetDate === date &&
+        target.syllabusItemId === itemId,
+    );
+
   const selectedRows = useMemo(
     () => flat.filter((row) => selected.includes(row.id)),
     [flat, selected],
@@ -193,7 +210,8 @@ export function AddMissionDialog({
           </DialogTitle>
           <DialogDescription>
             Pick a date, then choose syllabus items to plan. Anything already
-            planned that day can&apos;t be added twice.
+            planned that day can&apos;t be added twice — but its checkbox stays
+            live, so unticking it cancels the mission and its XP.
           </DialogDescription>
         </DialogHeader>
 
@@ -312,37 +330,73 @@ export function AddMissionDialog({
                           {openState ? (
                             <ul className="border-t p-1.5">
                               {items.map((item) => {
+                                const planned = plannedTarget(item.id);
                                 const alreadyPlanned = isPlanned(item.id, date);
-                                const checked =
-                                  alreadyPlanned || selected.includes(item.id);
+                                const earned = planned?.completed ?? false;
+                                const checked = planned
+                                  ? earned
+                                  : selected.includes(item.id);
+                                const xp = xpById[item.id] ?? 25;
+
+                                const handleChange = (next: boolean) => {
+                                  if (!planned) {
+                                    toggleItem(item.id, next);
+                                    return;
+                                  }
+                                  // Live mission: completing pays out, and
+                                  // unticking takes the XP straight back out
+                                  // because totals are derived from this flag.
+                                  toggleMission(planned);
+                                  toast(
+                                    next ? "Mission complete" : "Mission reopened",
+                                    {
+                                      description: next
+                                        ? `+${xp} XP · ${item.itemNumber}`
+                                        : `−${xp} XP removed · ${item.itemNumber}`,
+                                    },
+                                  );
+                                };
+
                                 return (
                                   <li key={item.id}>
                                     <label
                                       htmlFor={`mission-item-${item.id}`}
-                                      className={cn(
-                                        "flex items-center gap-3 rounded-md px-2 py-1.5 text-sm transition-colors",
-                                        alreadyPlanned
-                                          ? "cursor-not-allowed opacity-60"
-                                          : "cursor-pointer hover:bg-accent/60",
-                                      )}
+                                      className="flex cursor-pointer items-center gap-3 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent/60"
                                     >
                                       <Checkbox
                                         id={`mission-item-${item.id}`}
                                         checked={checked}
-                                        disabled={alreadyPlanned}
+                                        aria-label={
+                                          earned
+                                            ? `Uncheck ${item.title} to cancel its ${xp} XP`
+                                            : `Complete ${item.title} for ${xp} XP`
+                                        }
                                         onCheckedChange={(state) =>
-                                          toggleItem(item.id, state === true)
+                                          handleChange(state === true)
                                         }
                                       />
-                                      <span className="min-w-0 flex-1 truncate">
+                                      <span
+                                        className={cn(
+                                          "min-w-0 flex-1 truncate",
+                                          earned && "text-muted-foreground",
+                                        )}
+                                      >
                                         {item.title}
                                       </span>
-                                      <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-                                        +{xpById[item.id] ?? 25} XP
+                                      <span
+                                        className={cn(
+                                          "shrink-0 text-xs tabular-nums",
+                                          earned
+                                            ? "font-semibold text-primary"
+                                            : "text-muted-foreground",
+                                        )}
+                                      >
+                                        {earned ? "+" : ""}
+                                        {xp} XP
                                       </span>
                                       {alreadyPlanned ? (
                                         <span className="shrink-0 text-[11px] font-medium text-primary">
-                                          Planned
+                                          {earned ? "Done" : "Planned"}
                                         </span>
                                       ) : null}
                                     </label>

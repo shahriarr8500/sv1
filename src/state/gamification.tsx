@@ -1,141 +1,101 @@
 /**
- * Gamification state — total XP, level, streak and achievements, persisted to
- * `student-os:gamification:v1`.
+ * Gamification state — XP, level, streak and achievements.
  *
- * XP is only ever *added*, and every award is keyed by the thing that caused
- * it (target id / session id), so it cannot be farmed:
- *   - completing a mission pays out once, forever;
- *   - unchecking it never subtracts;
- *   - checking it again pays nothing because the id is already recorded;
- *   - a study session pays out once when it is recorded.
+ * XP is **derived**, never accumulated:
  *
- * Streaks and achievements are *derived* from the real target/session records
- * rather than stored, so they can never drift out of sync with reality.
+ *   XP = Σ (XP of completed missions) + Σ (XP of recorded study sessions)
+ *
+ * That single change gives both behaviours we need:
+ *
+ *   - completing a mission adds its XP;
+ *   - unchecking it removes that XP;
+ *   - toggling a mission over and over nets zero, because there is no ledger
+ *     to farm — the number is always recomputed from current state.
+ *
+ * Syllabus progress is deliberately *not* affected by unchecking; that lives
+ * in `StudentOSProvider` and is only ever filled in, never reverted.
+ *
+ * Streak and achievements are derived from the same records, so they cannot
+ * drift from what actually happened. The figures are cached to
+ * `student-os:gamification:v1` for inspection, but that cache is never read
+ * back as truth — `student-os:v1` and the target/session stores remain the
+ * source of truth.
  */
 
 import {
   createContext,
-  useCallback,
   useContext,
   useEffect,
   useMemo,
-  useState,
   type ReactNode,
 } from "react";
-import type { Target } from "@/lib/student-os/target-model";
 import {
   computeAchievements,
   currentStreak,
   emptyGamification,
   levelProgress,
-  loadGamification,
   saveGamification,
-  xpForStudySession,
+  todayTargetXp,
+  totalXp,
   type Achievement,
-  type GamificationState,
   type LevelProgress,
 } from "@/lib/student-os/gamification";
 import { useStudyLog } from "@/state/study-log";
 import { useTargets } from "@/state/targets";
 
 interface GamificationContextValue {
+  /** Total XP currently held. Falls when a mission is unchecked. */
   xp: number;
   level: LevelProgress;
   /** Consecutive days with real study activity. */
   streak: number;
   achievements: Achievement[];
-  /** XP paid by today's finished missions. */
+  /** XP from missions completed today. */
   xpToday: number;
-  awardTargetXp: (target: Target) => void;
 }
 
 const GamificationContext = createContext<GamificationContextValue | null>(null);
 
+function localDayKey(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
 export function GamificationProvider({ children }: { children: ReactNode }) {
   const { log } = useStudyLog();
   const { targets } = useTargets();
-  const [state, setState] = useState<GamificationState>(() => loadGamification());
 
-  useEffect(() => {
-    saveGamification(state);
-  }, [state]);
+  // Recomputed from the records on every relevant change — this is the truth.
+  const xp = useMemo(
+    () => totalXp(targets, log.sessions),
+    [targets, log.sessions],
+  );
 
-  // Study sessions pay out once each. The functional update re-checks against
-  // the *latest* state, so even a duplicated effect run cannot double-award.
-  useEffect(() => {
-    const sessions = log.sessions;
-    if (sessions.length === 0) return;
-    setState((previous) => {
-      const pending = sessions.filter(
-        (session) =>
-          session.mode === "study" &&
-          session.durationSeconds >= 60 &&
-          !previous.awardedSessionIds.includes(session.id),
-      );
-      if (pending.length === 0) return previous;
-      const gained = pending.reduce(
-        (sum, session) => sum + xpForStudySession(session.durationSeconds),
-        0,
-      );
-      if (gained === 0) return previous;
-      return {
-        ...previous,
-        xp: previous.xp + gained,
-        awardedSessionIds: [
-          ...previous.awardedSessionIds,
-          ...pending.map((session) => session.id),
-        ],
-      };
-    });
-  }, [log.sessions]);
-
-  /**
-   * Pays a mission out exactly once. Safe to call repeatedly: the guard is the
-   * target id itself, so unchecking and re-checking adds nothing.
-   */
-  const awardTargetXp = useCallback((target: Target) => {
-    setState((previous) => {
-      if (previous.awardedTargetIds.includes(target.id)) return previous;
-      const amount = Number.isFinite(target.xp) && target.xp > 0 ? target.xp : 25;
-      return {
-        ...previous,
-        xp: previous.xp + amount,
-        awardedTargetIds: [...previous.awardedTargetIds, target.id],
-      };
-    });
-  }, []);
-
-  const level = useMemo(() => levelProgress(state.xp), [state.xp]);
+  const level = useMemo(() => levelProgress(xp), [xp]);
   const streak = useMemo(() => currentStreak(log.sessions), [log.sessions]);
   const achievements = useMemo(
     () => computeAchievements({ targets, sessions: log.sessions }),
     [targets, log.sessions],
   );
+  const xpToday = useMemo(
+    () => todayTargetXp(targets, localDayKey(new Date())),
+    [targets],
+  );
 
-  // Today's mission XP: only targets completed today, paid out at most once.
-  const xpToday = useMemo(() => {
-    const now = new Date();
-    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-    return targets
-      .filter(
-        (t) =>
-          t.completed &&
-          t.targetDate === today &&
-          state.awardedTargetIds.includes(t.id),
-      )
-      .reduce((sum, t) => sum + (t.xp > 0 ? t.xp : 25), 0);
-  }, [targets, state.awardedTargetIds]);
+  // Cache the derived figures in their own namespace. Write-only: a corrupt
+  // or missing copy can never change what the UI shows, because nothing reads
+  // this back as truth. Refreshed whenever the derived values change.
+  useEffect(() => {
+    saveGamification({
+      ...emptyGamification(),
+      xp,
+      level: level.level,
+      updatedAt: Date.now(),
+    });
+  }, [xp, level.level]);
 
   const value = useMemo(
-    () => ({
-      xp: state.xp,
-      level,
-      streak,
-      achievements,
-      xpToday,
-      awardTargetXp,
-    }),
-    [state.xp, level, streak, achievements, xpToday, awardTargetXp],
+    () => ({ xp, level, streak, achievements, xpToday }),
+    [xp, level, streak, achievements, xpToday],
   );
 
   return (
@@ -153,5 +113,5 @@ export function useGamification(): GamificationContextValue {
   return context;
 }
 
-/** Empty state helper re-exported for tests and story-style fixtures. */
+/** Kept so callers can read the shape of a zeroed snapshot. */
 export { emptyGamification };

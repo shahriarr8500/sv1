@@ -70,10 +70,16 @@ export function TodayMissions() {
     const target = targets.find((t) => t.id === targetId);
     if (!target || target.completed === next) return;
     toggleMission(target);
+    const location = lookupItem(target.syllabusItemId);
+    const where = `${location?.subject.name ?? ""} ${location?.item.itemNumber ?? ""}`.trim();
     if (next) {
-      const location = lookupItem(target.syllabusItemId);
       toast.success("Mission complete", {
-        description: `+${target.xp} XP · ${location?.subject.name ?? ""} ${location?.item.itemNumber ?? ""}`.trim(),
+        description: `+${target.xp} XP${where ? ` · ${where}` : ""}`,
+      });
+    } else {
+      // XP is derived from completion, so it drops straight back out.
+      toast("Mission reopened", {
+        description: `−${target.xp} XP removed${where ? ` · ${where}` : ""}`,
       });
     }
   };
