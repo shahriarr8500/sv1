@@ -34,6 +34,8 @@ const Checkout = lazy(() => import("./pages/Checkout.tsx"));
 const Bookings = lazy(() => import("./pages/Bookings.tsx"));
 const Admin = lazy(() => import("./pages/Admin.tsx"));
 const StudyTimer = lazy(() => import("./pages/StudyTimer.tsx"));
+// Unlinked sandbox for trying new UI without touching the app.
+const Labs = lazy(() => import("./labs/Labs.tsx"));
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
 
 // Simple loading fallback for route transitions
@@ -236,6 +238,10 @@ createRoot(document.getElementById("root")!).render(
                   <Route path="/timer" element={<StudyTimer />} />
                   <Route path="/admin" element={<Admin />} />
                 </Route>
+                {/* Sandbox: not linked from any nav, public so an experiment can
+                    be previewed without signing in. */}
+                <Route path="/labs" element={<Labs />} />
+                <Route path="/labs/:feature" element={<Labs />} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </Suspense>
