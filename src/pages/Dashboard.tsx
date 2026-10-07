@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ContinueStudying } from "@/components/student-os/ContinueStudying";
+import { DailyBriefing } from "@/components/student-os/DailyBriefing";
 import { DailyGuidance } from "@/components/student-os/DailyGuidance";
 import { LevelCard } from "@/components/student-os/LevelCard";
 import { OverallProgressCard } from "@/components/student-os/OverallProgressCard";
@@ -114,8 +115,11 @@ export default function DashboardPage() {
       {/* 1. Who you are + what to do right now */}
       <WelcomeHeader />
 
-      {/* 2. Peaceful, non-gamified pause before the work */}
-      <DailyGuidance />
+      {/* 2. Quiet briefing — guidance and a two-line summary of real progress */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <DailyGuidance />
+        <DailyBriefing />
+      </div>
 
       {/* 3. Today's missions — the heart of the loop */}
       <StudentOSTargetsErrorBoundary>
