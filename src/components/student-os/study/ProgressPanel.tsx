@@ -5,10 +5,10 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import {
-  dailySeries,
   formatDuration,
   groupByDay,
   groupByMonth,
+  monthDaySeries,
   monthlySeries,
   monthsOfYear,
   totalSeconds,
@@ -25,13 +25,16 @@ function BarChart({
   data,
   ariaLabel,
   emptyLabel,
+  alwaysShow = false,
 }: {
   data: SeriesPoint[];
   ariaLabel: string;
   emptyLabel: string;
+  /** Draw the full axis even when every bar is zero. */
+  alwaysShow?: boolean;
 }) {
   const hasData = data.some((point) => point.seconds > 0);
-  if (!hasData) {
+  if (!hasData && !alwaysShow) {
     return (
       <p className="py-10 text-center text-sm text-muted-foreground">
         {emptyLabel}
@@ -42,36 +45,45 @@ function BarChart({
   const max = Math.max(...data.map((point) => point.seconds), 1);
 
   return (
-    <div className="flex h-44 gap-1.5" role="img" aria-label={ariaLabel}>
-      {data.map((point, index) => (
-        <div
-          key={`${point.sub}-${index}`}
-          className="flex min-w-0 flex-1 flex-col items-center gap-1.5"
-        >
-          <div className="flex h-full w-full items-end justify-center">
-            <div
-              className={cn(
-                "w-full rounded-t transition-[height] duration-300",
-                point.seconds > 0
-                  ? point.current
-                    ? "bg-primary"
-                    : "bg-primary/50"
-                  : "bg-muted",
-              )}
-              style={{
-                height:
+    <div className="overflow-x-auto pb-1">
+      <div
+        className="flex h-44 gap-1.5"
+        role="img"
+        aria-label={ariaLabel}
+        // Enough room per bar that 31 day labels stay readable; on narrow
+        // screens the chart scrolls rather than collapsing.
+        style={{ minWidth: `${data.length * 22}px` }}
+      >
+        {data.map((point, index) => (
+          <div
+            key={`${point.sub}-${index}`}
+            className="flex min-w-0 flex-1 flex-col items-center gap-1.5"
+          >
+            <div className="flex h-full w-full items-end justify-center">
+              <div
+                className={cn(
+                  "w-full rounded-t transition-[height] duration-300",
                   point.seconds > 0
-                    ? `${Math.max(6, (point.seconds / max) * 100)}%`
-                    : "4%",
-              }}
-              title={`${point.sub} · ${formatDuration(point.seconds)}`}
-            />
+                    ? point.current
+                      ? "bg-primary"
+                      : "bg-primary/50"
+                    : "bg-muted",
+                )}
+                style={{
+                  height:
+                    point.seconds > 0
+                      ? `${Math.max(6, (point.seconds / max) * 100)}%`
+                      : "4%",
+                }}
+                title={`${point.sub} · ${formatDuration(point.seconds)}`}
+              />
+            </div>
+            <span className="w-full truncate text-center text-[10px] text-muted-foreground">
+              {point.label}
+            </span>
           </div>
-          <span className="w-full truncate text-center text-[10px] text-muted-foreground">
-            {point.label}
-          </span>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   );
 }
@@ -112,7 +124,8 @@ export function ProgressPanel() {
     [log.sessions],
   );
 
-  const now = new Date();
+  // Fixed for this mount so the month series below can memoise on it.
+  const now = useMemo(() => new Date(), []);
   const todayKey = format(now, "yyyy-MM-dd");
   const currentMonthKey = format(now, "yyyy-MM");
   const currentYearKey = yearKey(now.getTime());
@@ -132,7 +145,7 @@ export function ProgressPanel() {
   const allSeconds = totalSeconds(study);
   const restThisMonth = restMonthTotals.get(currentMonthKey) ?? 0;
 
-  const daily = useMemo(() => dailySeries(dayTotals, 14), [dayTotals]);
+  const daily = useMemo(() => monthDaySeries(dayTotals, now), [dayTotals, now]);
   const monthly = useMemo(() => monthlySeries(monthTotals, 12), [monthTotals]);
 
   const years = useMemo(() => yearsWithStudyTime(study), [study]);
@@ -140,8 +153,11 @@ export function ProgressPanel() {
   // Cheap enough to compute directly — 12 map lookups per render.
   const yearMonths = monthsOfYear(monthTotals, activeYear);
 
+  // Averaged over the days that have actually happened this month, so the
+  // empty days still to come don't drag the pace down.
+  const elapsedDays = now.getDate();
   const dailyAverage = Math.round(
-    daily.reduce((sum, point) => sum + point.seconds, 0) / 14,
+    daily.reduce((sum, point) => sum + point.seconds, 0) / elapsedDays,
   );
   const yearSecondsForActiveYear = yearMonths.reduce(
     (sum, point) => sum + point.seconds,
@@ -196,15 +212,18 @@ export function ProgressPanel() {
           <div className="flex w-full flex-wrap items-baseline justify-between gap-2">
             <CardTitle className="text-base">Daily study hours</CardTitle>
             <p className="text-xs text-muted-foreground tabular-nums">
-              Last 14 days · avg {formatDuration(dailyAverage)} per day
+              {format(now, "MMMM yyyy")} · avg {formatDuration(dailyAverage)}{" "}
+              per day
             </p>
           </div>
         </CardHeader>
         <CardContent>
           <BarChart
             data={daily}
-            ariaLabel="Study hours per day for the last 14 days"
-            emptyLabel="No sessions in the last 14 days."
+            ariaLabel={`Study hours per day for ${format(now, "MMMM yyyy")}`}
+            emptyLabel="No sessions recorded this month."
+            // Every day of the month stays visible even when nothing is logged.
+            alwaysShow
           />
         </CardContent>
       </Card>

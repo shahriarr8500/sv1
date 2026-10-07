@@ -166,6 +166,31 @@ export function dailySeries(
   return points;
 }
 
+/**
+ * Every day of `now`'s month, 1 → last day, with today marked current.
+ *
+ * Days that have not happened yet are included with zero seconds so the month
+ * is always shown as a complete arc; `current` keeps today distinguishable.
+ */
+export function monthDaySeries(
+  dayTotals: Map<string, number>,
+  now = new Date(),
+): SeriesPoint[] {
+  const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const todayDay = now.getDate();
+  const points: SeriesPoint[] = [];
+  for (let day = 1; day <= lastDay; day++) {
+    const date = new Date(now.getFullYear(), now.getMonth(), day);
+    points.push({
+      label: format(date, "d"),
+      sub: format(date, "EEE d MMM yyyy"),
+      seconds: dayTotals.get(format(date, "yyyy-MM-dd")) ?? 0,
+      current: day === todayDay,
+    });
+  }
+  return points;
+}
+
 /** Last `months` months, oldest → newest, with the current month marked. */
 export function monthlySeries(
   monthTotals: Map<string, number>,
