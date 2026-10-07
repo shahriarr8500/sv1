@@ -6,9 +6,10 @@
  * pays out the mission's XP exactly once. Unchecking only undoes the target.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
+import { celebrate } from "@/state/celebration";
 import {
   CheckCircle2,
   Flame,
@@ -23,7 +24,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
 import { AddMissionDialog } from "@/components/student-os/AddMissionDialog";
 import { lookupItem } from "@/lib/student-os/syllabus";
-import { perfectDayKeys } from "@/lib/student-os/gamification";
+import { perfectDayKeys, PERFECT_DAY_XP } from "@/lib/student-os/gamification";
 import { cn } from "@/lib/utils";
 import { useStudentOS } from "@/state/student-os";
 import { useStudyLog } from "@/state/study-log";
@@ -39,10 +40,18 @@ function todayKey(): string {
 export function TodayMissions() {
   const { targets, today } = useTargets();
   const { toggleMission, removeMission } = useMissionActions();
-  const { xpToday, level } = useGamification();
+  const { xpToday, level, streak } = useGamification();
   const { active, startTimer } = useStudyLog();
   const { completions } = useStudentOS();
   const [dialogOpen, setDialogOpen] = useState(false);
+
+  // The welcome header's "Plan today's missions" CTA hands off here so the
+  // student never has to hunt for the planner.
+  useEffect(() => {
+    const open = () => setDialogOpen(true);
+    window.addEventListener("student-os:add-mission", open);
+    return () => window.removeEventListener("student-os:add-mission", open);
+  }, []);
 
   const key = todayKey();
   const planned = today.length;
@@ -73,9 +82,30 @@ export function TodayMissions() {
     const location = lookupItem(target.syllabusItemId);
     const where = `${location?.subject.name ?? ""} ${location?.item.itemNumber ?? ""}`.trim();
     if (next) {
-      toast.success("Mission complete", {
-        description: `+${target.xp} XP${where ? ` · ${where}` : ""}`,
-      });
+      // One satisfying moment, not two. The celebration already carries the
+      // detail and the XP read-out, so a matching toast would just repeat it.
+      const nowCompleted = completed + 1;
+      const streakNote =
+        streak > 0
+          ? `Streak: ${streak} day${streak === 1 ? "" : "s"}`
+          : undefined;
+      if (planned > 0 && nowCompleted === planned) {
+        celebrate({
+          kind: "perfect",
+          title: "Perfect day",
+          detail: `${nowCompleted} / ${planned} missions complete`,
+          xp: PERFECT_DAY_XP,
+          note: streakNote,
+        });
+      } else {
+        celebrate({
+          kind: "target",
+          title: "Target complete",
+          detail: where || target.syllabusItemId,
+          xp: target.xp,
+          note: streakNote,
+        });
+      }
     } else {
       // XP is derived from completion, so it drops straight back out.
       toast("Mission reopened", {

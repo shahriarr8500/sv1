@@ -1,14 +1,15 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ContinueStudying } from "@/components/student-os/ContinueStudying";
-import { GoalHeader } from "@/components/student-os/GoalHeader";
+import { DailyGuidance } from "@/components/student-os/DailyGuidance";
 import { LevelCard } from "@/components/student-os/LevelCard";
 import { OverallProgressCard } from "@/components/student-os/OverallProgressCard";
-import { PerformanceCard } from "@/components/student-os/PerformanceCard";
 import { RecentProgress } from "@/components/student-os/RecentProgress";
+import { StreakStrip } from "@/components/student-os/StreakStrip";
 import { StudentOSTargetsErrorBoundary } from "@/components/student-os/StudentOSTargetsErrorBoundary";
 import { SubjectCard } from "@/components/student-os/SubjectCard";
 import { TodayMissions } from "@/components/student-os/TodayMissions";
+import { WelcomeHeader } from "@/components/student-os/WelcomeHeader";
 import { formatPrice } from "@/lib/student-os/catalog";
 import { formatBookingDate } from "@/lib/student-os/format";
 import {
@@ -71,11 +72,12 @@ function PaperSelector({
 }
 
 /**
- * Dashboard — the Student OS home screen, in the required priority order:
- *   1. Today's Targets (daily missions)
- *   2. Performance (compact card)
- *   3. Syllabus progress
- *   4. Continue studying → Recent progress
+ * Dashboard — the Student OS home screen, ordered around the daily loop:
+ *   greet → daily guidance → today's missions → what's next → summary
+ *
+ * Deliberately not a wall of cards: one greeting, one quiet reading card,
+ * one mission list, one next action, then progress. Everything else lives
+ * behind the syllabus and performance routes.
  */
 export default function DashboardPage() {
   const { profile, completions } = useStudentOS();
@@ -108,20 +110,30 @@ export default function DashboardPage() {
   if (!profile) return null;
 
   return (
-    <div className="space-y-8">
-      <GoalHeader profile={profile} />
+    <div className="space-y-6">
+      {/* 1. Who you are + what to do right now */}
+      <WelcomeHeader />
 
-      {/* 1. Today's mission → 2. performance → 3. syllabus → 4. what's next */}
+      {/* 2. Peaceful, non-gamified pause before the work */}
+      <DailyGuidance />
+
+      {/* 3. Today's missions — the heart of the loop */}
       <StudentOSTargetsErrorBoundary>
-        <div className="space-y-4">
-          <TodayMissions />
-          <div className="grid gap-4 lg:grid-cols-2">
-            <LevelCard />
-            <PerformanceCard />
-          </div>
-        </div>
+        <TodayMissions />
       </StudentOSTargetsErrorBoundary>
 
+      {/* 4. Next action + consistency + level */}
+      <div className="grid gap-4 lg:grid-cols-3">
+        <div className="lg:col-span-2">
+          <ContinueStudying next={next} subjects={subjects} />
+        </div>
+        <div className="space-y-4">
+          <StreakStrip />
+          <LevelCard />
+        </div>
+      </div>
+
+      {/* 5. Syllabus progress — the organised, Notion-like layer */}
       <section aria-labelledby="syllabus-progress-heading" className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2
@@ -152,7 +164,6 @@ export default function DashboardPage() {
           upcoming ? "lg:grid-cols-3" : "lg:grid-cols-2",
         )}
       >
-        <ContinueStudying next={next} subjects={subjects} />
         {upcoming ? (
           <motion.div
             initial={{ opacity: 0, y: 8 }}

@@ -98,7 +98,21 @@ export function totalXp(
   targets: readonly Target[],
   sessions: readonly StudySession[],
 ): number {
-  return totalTargetXp(targets) + totalSessionXp(sessions);
+  return (
+    totalTargetXp(targets) + totalSessionXp(sessions) + perfectDayXp(targets)
+  );
+}
+
+/** Awarded for finishing every mission planned on a day. */
+export const PERFECT_DAY_XP = 100;
+
+/**
+ * Perfect-day bonus, derived like everything else: it appears when the last
+ * mission of the day is completed and disappears again if one is unchecked.
+ * There is no ledger, so it can never be farmed by toggling.
+ */
+export function perfectDayXp(targets: readonly Target[]): number {
+  return perfectDayKeys(targets).size * PERFECT_DAY_XP;
 }
 
 /** XP earned by missions completed on a given local day key. */

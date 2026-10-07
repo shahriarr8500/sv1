@@ -14,8 +14,12 @@ import {
   useStudentOS,
 } from "@/state/student-os";
 import { cn } from "@/lib/utils";
+import {
+  setGuidanceLanguage,
+  useGuidanceLanguage,
+} from "@/state/guidance-language";
 import { motion } from "framer-motion";
-import { ArrowRight, LogOut, Moon, Sun } from "lucide-react";
+import { ArrowRight, Languages, LogOut, Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
 import { Navigate, useNavigate } from "react-router";
 
@@ -28,6 +32,7 @@ export default function SettingsPage() {
   const subjects = useSelectedSubjects();
   const overall = useOverallProgress();
   const { theme, setTheme } = useTheme();
+  const guidanceLanguage = useGuidanceLanguage();
 
   if (!profile) return <Navigate to="/onboarding" replace />;
 
@@ -126,6 +131,54 @@ export default function SettingsPage() {
             >
               <Moon className="size-3.5" aria-hidden />
               Dark
+            </button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="gap-4">
+        <CardHeader>
+          <div className="space-y-1.5">
+            <CardTitle className="text-base">Daily Guidance language</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Choose the translation shown beneath the Quran verse. The Arabic
+              text and its Surah:Ayah reference never change.
+            </p>
+          </div>
+        </CardHeader>
+        <CardContent className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Languages className="size-4 text-primary" aria-hidden />
+            <span>
+              {guidanceLanguage === "bn" ? "বাংলা অনুবাদ is on" : "English translation is on"}
+            </span>
+          </div>
+          <div role="group" aria-label="Guidance language" className="flex gap-2">
+            <button
+              type="button"
+              aria-pressed={guidanceLanguage === "en"}
+              onClick={() => setGuidanceLanguage("en")}
+              className={cn(
+                "cursor-pointer rounded-lg border px-3.5 py-2 text-sm transition-colors",
+                guidanceLanguage === "en"
+                  ? "border-primary/60 bg-primary/10 font-medium text-primary"
+                  : "border-border text-foreground hover:border-primary/40 hover:bg-accent",
+              )}
+            >
+              English
+            </button>
+            <button
+              type="button"
+              aria-pressed={guidanceLanguage === "bn"}
+              onClick={() => setGuidanceLanguage("bn")}
+              className={cn(
+                "cursor-pointer rounded-lg border px-3.5 py-2 text-sm transition-colors",
+                guidanceLanguage === "bn"
+                  ? "border-primary/60 bg-primary/10 font-medium text-primary"
+                  : "border-border text-foreground hover:border-primary/40 hover:bg-accent",
+              )}
+            >
+              বাংলা
             </button>
           </div>
         </CardContent>

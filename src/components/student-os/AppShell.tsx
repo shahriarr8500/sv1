@@ -7,6 +7,8 @@
 
 import { Button } from "@/components/ui/button";
 import { StudentOsLogo } from "@/components/student-os/StudentOsLogo";
+import { CompletionCelebration } from "@/components/student-os/CompletionCelebration";
+import { QuranPlayer } from "@/components/student-os/QuranPlayer";
 import {
   Sheet,
   SheetContent,
@@ -370,10 +372,14 @@ export function AppShell() {
 
       {/* Content */}
       <div className="lg:pl-64">
-        <main className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-8 lg:py-10">
+        <main className="mx-auto w-full max-w-6xl px-4 pt-6 pb-28 sm:px-6 lg:px-8 lg:pt-10">
           <Outlet />
         </main>
       </div>
+
+      {/* Mounted once so both survive every route change. */}
+      <CompletionCelebration />
+      <QuranPlayer />
     </div>
   );
 }

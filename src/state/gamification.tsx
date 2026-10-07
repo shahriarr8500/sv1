@@ -4,11 +4,14 @@
  * XP is **derived**, never accumulated:
  *
  *   XP = Σ (XP of completed missions) + Σ (XP of recorded study sessions)
+ *        + (100 per perfectly completed day)
  *
  * That single change gives both behaviours we need:
  *
  *   - completing a mission adds its XP;
  *   - unchecking it removes that XP;
+ *   - finishing every mission of a day adds the perfect-day bonus, and
+ *     unchecking any one of them removes it again;
  *   - toggling a mission over and over nets zero, because there is no ledger
  *     to farm — the number is always recomputed from current state.
  *
