@@ -17,16 +17,12 @@ import { SYLLABUS } from "@/lib/student-os/syllabus";
 import type { StudentProfile, Subject } from "@/lib/student-os/types";
 import { useAction, useMutation, useQuery } from "convex/react";
 import {
-  Ban,
   ChevronDown,
   ChevronUp,
   Loader2,
   LogIn,
   RotateCcw,
   Save,
-  ShieldBan,
-  ShieldCheck,
-  ShieldOff,
   UserX,
   Users,
 } from "lucide-react";
@@ -256,7 +252,6 @@ function UserCard({
                 );
               }}
             >
-              <Ban className="mr-2 size-4" />
               {user.bannedAt === null ? "Ban" : "Unban"}
             </Button>
             <Button
@@ -417,91 +412,6 @@ function UserCard({
 }
 
 /**
- * Banned accounts, lifted out of the main list so restoring someone is a
- * single click rather than a hunt through every account on the deployment.
- */
-function BannedSection({ users }: { users: AdminUser[] }) {
-  const banUser = useAction(api.admin.banUser);
-  const [pendingId, setPendingId] = useState<Id<"users"> | null>(null);
-
-  return (
-    <section className="space-y-3 rounded-xl border border-red-500/30 bg-red-500/5 p-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <ShieldBan className="size-4 text-red-500" />
-          <h2 className="text-sm font-semibold tracking-tight">
-            Banned accounts
-          </h2>
-          <span className="rounded-lg bg-red-500/15 px-1.5 py-0.5 text-[11px] font-medium text-red-500">
-            {users.length}
-          </span>
-        </div>
-        <p className="text-xs text-muted-foreground">
-          Suspended accounts are signed out and cannot save progress.
-        </p>
-      </div>
-
-      {users.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No accounts are banned right now.
-        </p>
-      ) : (
-        <ul className="space-y-2">
-          {users.map((user) => (
-            <li
-              key={user.id}
-              className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card p-3"
-            >
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium tracking-tight">
-                  {user.name || user.email || "Unnamed account"}
-                </p>
-                <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                  {user.email ?? "No email"} · banned{" "}
-                  {user.bannedAt
-                    ? formatRelativeDay(user.bannedAt)
-                    : "recently"}
-                </p>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                className="cursor-pointer"
-                disabled={pendingId !== null}
-                onClick={async () => {
-                  setPendingId(user.id);
-                  try {
-                    await banUser({ userId: user.id, banned: false });
-                    toast.success(
-                      `${user.name || user.email || "That account"} can sign in again`,
-                    );
-                  } catch (error) {
-                    toast.error(
-                      error instanceof Error
-                        ? error.message
-                        : "Could not unban that account",
-                    );
-                  } finally {
-                    setPendingId(null);
-                  }
-                }}
-              >
-                {pendingId === user.id ? (
-                  <Loader2 className="mr-2 size-3.5 animate-spin" />
-                ) : (
-                  <ShieldCheck className="mr-2 size-3.5" />
-                )}
-                Unban
-              </Button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
-  );
-}
-
-/**
  * Admin console — every account on the deployment with its login details and
  * the dashboard state mirrored from that student's device.
  */
@@ -514,9 +424,7 @@ export default function AdminConsole() {
   const repairOrphanAccounts = useAction(api.admin.repairOrphanAccounts);
   const didRepair = useRef(false);
 
-  const bannedUsers = (users ?? []).filter((user) => user.bannedAt !== null);
-
-  // Accounts deleted before the login-row purge existed left their auth record
+  // Accounts deleted before the loginrow purge existed left their auth record
   // behind, which locks that email out of signing in again for good. Clear
   // those leftovers as soon as an admin opens the console.
   useEffect(() => {
@@ -589,13 +497,10 @@ export default function AdminConsole() {
               navigate("/dashboard", { replace: true });
             }}
           >
-            <ShieldOff className="mr-2 size-4" />
             Revoke my admin access
           </Button>
         </div>
       </div>
-
-      <BannedSection users={bannedUsers} />
 
       <h2 className="text-sm font-semibold tracking-tight">
         All accounts
