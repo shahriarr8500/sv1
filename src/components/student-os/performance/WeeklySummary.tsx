@@ -14,7 +14,6 @@ import {
   formatStudyTime,
   localDayKey,
   mondayKey,
-  shiftKey,
   studySecondsBetween,
   weekSuccess,
 } from "@/lib/student-os/performance";
@@ -28,8 +27,9 @@ export function WeeklySummary() {
   const { log } = useStudyLog();
   const { streak, xp, achievements } = useGamification();
 
-  const now = new Date();
-  const thisMonday = mondayKey(now);
+  // Fixed for this mount so the week memos below stay stable.
+  const now = useMemo(() => new Date(), []);
+  const thisMonday = useMemo(() => mondayKey(now), [now]);
   const todayKey = localDayKey(now);
 
   const week = useMemo(() => weekSuccess(targets, now), [targets, now]);

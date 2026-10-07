@@ -71,9 +71,11 @@ function PaperSelector({
 }
 
 /**
- * Dashboard — the Student OS home screen, in priority order:
- *   1. Your goal → 2. Overall progress → 3. Subject progress
- *   → 4. Continue studying → 5. Recent progress
+ * Dashboard — the Student OS home screen, in the required priority order:
+ *   1. Today's Targets (daily missions)
+ *   2. Performance (compact card)
+ *   3. Syllabus progress
+ *   4. Continue studying → Recent progress
  */
 export default function DashboardPage() {
   const { profile, completions } = useStudentOS();

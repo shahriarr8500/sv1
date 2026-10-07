@@ -37,7 +37,7 @@ function todayKey(): string {
 }
 
 export function TodayMissions() {
-  const { targets, today, setCompleted } = useTargets();
+  const { targets, today } = useTargets();
   const { toggleMission, removeMission } = useMissionActions();
   const { xpToday, level } = useGamification();
   const { active, startTimer } = useStudyLog();

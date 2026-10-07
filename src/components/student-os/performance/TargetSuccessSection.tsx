@@ -52,7 +52,8 @@ export function TargetSuccessSection() {
     [rows],
   );
 
-  const now = new Date();
+  // Fixed for this mount so the week memos below stay stable.
+  const now = useMemo(() => new Date(), []);
   const week = useMemo(() => weekSuccess(targets, now), [targets, now]);
   const previous = useMemo(
     () => previousWeekSuccess(targets, now),

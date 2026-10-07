@@ -87,11 +87,13 @@ function NavRow({
 }
 
 function SidebarNav({
-  subjects = useSelectedSubjects(),
+  subjects,
   progressBySubject,
   onNavigate,
 }: {
-  subjects?: ReturnType<typeof useSelectedSubjects>;
+  /** Passed by AppShell — never defaulted to a hook call, which would make
+   *  hook order depend on whether the prop happened to be supplied. */
+  subjects: ReturnType<typeof useSelectedSubjects>;
   progressBySubject: Map<string, number>;
   onNavigate?: () => void;
 }) {

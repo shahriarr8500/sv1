@@ -53,8 +53,9 @@ export function StudyTimeSection() {
     [rows],
   );
 
-  const now = new Date();
-  const thisMonday = mondayKey(now);
+  // Fixed for this mount so the week memos below stay stable.
+  const now = useMemo(() => new Date(), []);
+  const thisMonday = useMemo(() => mondayKey(now), [now]);
   const weekSeconds = useMemo(
     () => studySecondsBetween(log.sessions, thisMonday, localDayKey(now)),
     [log.sessions, thisMonday],
