@@ -28,8 +28,11 @@ const VOLUME_KEY = "student-os:quran-volume";
 
 function readVolume(): number {
   try {
-    const stored = Number(localStorage.getItem(VOLUME_KEY));
-    return Number.isFinite(stored) && stored >= 0 && stored <= 1 ? stored : 0.8;
+    const stored = localStorage.getItem(VOLUME_KEY);
+    // `Number(null)` is 0, which would silently start every surah muted.
+    if (stored === null || stored.trim() === "") return 0.8;
+    const parsed = Number(stored);
+    return Number.isFinite(parsed) && parsed > 0 && parsed <= 1 ? parsed : 0.8;
   } catch {
     return 0.8;
   }

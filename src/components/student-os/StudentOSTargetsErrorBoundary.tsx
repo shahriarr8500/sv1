@@ -1,9 +1,5 @@
 import { Component, type ReactNode } from "react";
 
-interface StudentOSTargetsErrorBoundaryProps {
-  children: ReactNode;
-}
-
 export class StudentOSTargetsErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; error: Error | null }> {
   state = { hasError: false, error: null as null | Error };
 

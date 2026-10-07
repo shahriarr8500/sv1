@@ -1,8 +1,7 @@
-import { NavLink, useNavigate } from "react-router";
+import { NavLink } from "react-router";
 import { cn } from "@/lib/utils";
 import { Briefcase, LayoutDashboard, Settings, User, Volume2 } from "lucide-react";
-import { useStudentOS, useSubjectsForPaper } from "@/state/student-os";
-import type { Subject } from "@/lib/student-os/types";
+import { useSubjectsForPaper } from "@/state/student-os";
 
 interface SidebarNavProps {
   onNavigate?: () => void;
@@ -23,7 +22,6 @@ export function SidebarNav({
   progressBySubject,
   onNavigate,
 }: SidebarNavProps) {
-  const navigate = useNavigate();
   const subjects = useSubjectsForPaper(paperView);
 
   return (

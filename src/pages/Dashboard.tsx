@@ -122,18 +122,16 @@ export default function DashboardPage() {
         <TodayMissions />
       </StudentOSTargetsErrorBoundary>
 
-      {/* 4. Next action + consistency + level */}
-      <div className="grid gap-4 lg:grid-cols-3">
-        <div className="lg:col-span-2">
-          <ContinueStudying next={next} subjects={subjects} />
-        </div>
-        <div className="space-y-4">
-          <StreakStrip />
-          <LevelCard />
-        </div>
+      {/* 4. Next action — one card, full width, nothing competing with it */}
+      <ContinueStudying next={next} subjects={subjects} />
+
+      {/* 5. Consistency + level — two equal cards, no nested column wrappers */}
+      <div className="grid gap-4 sm:grid-cols-2">
+        <StreakStrip />
+        <LevelCard />
       </div>
 
-      {/* 5. Syllabus progress — the organised, Notion-like layer */}
+      {/* 6. Syllabus progress — the organised, Notion-like layer */}
       <section aria-labelledby="syllabus-progress-heading" className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2
