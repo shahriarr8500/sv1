@@ -7,6 +7,7 @@
  */
 
 import type { Target } from "./target-model";
+import { BASE_MISSION_XP } from "./gamification";
 
 export interface TargetsState {
   targets: Target[];
@@ -18,13 +19,40 @@ function emptyTargets(): TargetsState {
   return { targets: [] };
 }
 
+/**
+ * Defensive normalisation. A record that is not shaped like a Target is
+ * dropped rather than rendered, and a missing/invalid XP value falls back to
+ * the standard mission reward — malformed storage can never crash the app.
+ */
+function normalizeTarget(raw: unknown): Target | null {
+  if (!raw || typeof raw !== "object") return null;
+  const t = raw as Partial<Target>;
+  if (typeof t.id !== "string" || typeof t.syllabusItemId !== "string") return null;
+  if (t.period !== "daily" && t.period !== "weekly") return null;
+  const xp =
+    typeof t.xp === "number" && Number.isFinite(t.xp) && t.xp > 0
+      ? Math.round(t.xp)
+      : BASE_MISSION_XP;
+  return {
+    id: t.id,
+    syllabusItemId: t.syllabusItemId,
+    period: t.period,
+    createdAt: typeof t.createdAt === "number" ? t.createdAt : Date.now(),
+    completed: t.completed === true,
+    completedAt: typeof t.completedAt === "number" ? t.completedAt : undefined,
+    targetDate: typeof t.targetDate === "string" ? t.targetDate : undefined,
+    weekStart: typeof t.weekStart === "string" ? t.weekStart : undefined,
+    xp,
+  };
+}
+
 function loadTargets(): TargetsState {
   try {
     const raw = window.localStorage.getItem(TARGETS_KEY);
     if (!raw) return emptyTargets();
     const parsed = JSON.parse(raw) as Partial<TargetsState>;
-    const targets = Array.isArray(parsed.targets) ? parsed.targets : [];
-    return { targets };
+    if (!Array.isArray(parsed.targets)) return emptyTargets();
+    return { targets: parsed.targets.map(normalizeTarget).filter((t): t is Target => t !== null) };
   } catch {
     return emptyTargets();
   }

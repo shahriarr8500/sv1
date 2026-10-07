@@ -2,9 +2,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ContinueStudying } from "@/components/student-os/ContinueStudying";
 import { GoalHeader } from "@/components/student-os/GoalHeader";
+import { LevelCard } from "@/components/student-os/LevelCard";
 import { OverallProgressCard } from "@/components/student-os/OverallProgressCard";
+import { PerformanceCard } from "@/components/student-os/PerformanceCard";
 import { RecentProgress } from "@/components/student-os/RecentProgress";
+import { StudentOSTargetsErrorBoundary } from "@/components/student-os/StudentOSTargetsErrorBoundary";
 import { SubjectCard } from "@/components/student-os/SubjectCard";
+import { TodayMissions } from "@/components/student-os/TodayMissions";
 import { formatPrice } from "@/lib/student-os/catalog";
 import { formatBookingDate } from "@/lib/student-os/format";
 import {
@@ -105,17 +109,29 @@ export default function DashboardPage() {
     <div className="space-y-8">
       <GoalHeader profile={profile} />
 
-      <PaperSelector value={paper} onChange={setPaper} />
+      {/* 1. Today's mission → 2. performance → 3. syllabus → 4. what's next */}
+      <StudentOSTargetsErrorBoundary>
+        <div className="space-y-4">
+          <TodayMissions />
+          <div className="grid gap-4 lg:grid-cols-2">
+            <LevelCard />
+            <PerformanceCard />
+          </div>
+        </div>
+      </StudentOSTargetsErrorBoundary>
 
-      <OverallProgressCard summary={overall} subjects={subjects} />
+      <section aria-labelledby="syllabus-progress-heading" className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2
+            id="syllabus-progress-heading"
+            className="text-xs font-semibold tracking-wider text-muted-foreground uppercase"
+          >
+            Syllabus Progress
+          </h2>
+          <PaperSelector value={paper} onChange={setPaper} />
+        </div>
 
-      <section aria-labelledby="subject-progress-heading" className="space-y-4">
-        <h2
-          id="subject-progress-heading"
-          className="text-xs font-semibold tracking-wider text-muted-foreground uppercase"
-        >
-          Subject Progress
-        </h2>
+        <OverallProgressCard summary={overall} subjects={subjects} />
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {subjects.map((subject, index) => (
             <SubjectCard

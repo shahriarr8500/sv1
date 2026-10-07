@@ -28,6 +28,7 @@ import {
   useSubjectsForPaper,
 } from "@/state/student-os";
 import {
+  BarChart3,
   CalendarCheck,
   LayoutDashboard,
   LayoutGrid,
@@ -101,6 +102,10 @@ function SidebarNav({
           end
           onNavigate={onNavigate}
           entry={{ to: "/dashboard", label: "Dashboard", icon: LayoutDashboard }}
+        />
+        <NavRow
+          onNavigate={onNavigate}
+          entry={{ to: "/performance", label: "Performance", icon: BarChart3 }}
         />
       </ul>
 

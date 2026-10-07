@@ -6,6 +6,9 @@ import { AppShell } from "@/components/student-os/AppShell";
 import { StudentOSProvider } from "@/state/student-os";
 import { WorkspaceProvider } from "@/state/workspace";
 import { StudyLogProvider } from "@/state/study-log";
+import { TargetsProvider } from "@/state/targets";
+import { GamificationProvider } from "@/state/gamification";
+import { TimerWidget } from "@/components/student-os/TimerWidget";
 import { VlyToolbar } from "../vly-toolbar-readonly.tsx";
 import { ConvexAuthProvider } from "@convex-dev/auth/react";
 import { ThemeProvider } from "next-themes";
@@ -34,6 +37,7 @@ const Checkout = lazy(() => import("./pages/Checkout.tsx"));
 const Bookings = lazy(() => import("./pages/Bookings.tsx"));
 const Admin = lazy(() => import("./pages/Admin.tsx"));
 const StudyTimer = lazy(() => import("./pages/StudyTimer.tsx"));
+const Performance = lazy(() => import("./pages/Performance.tsx"));
 // Unlinked sandbox for trying new UI without touching the app.
 const Labs = lazy(() => import("./labs/Labs.tsx"));
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
@@ -146,6 +150,8 @@ createRoot(document.getElementById("root")!).render(
         <StudentOSProvider>
           <WorkspaceProvider>
             <StudyLogProvider>
+          <TargetsProvider>
+          <GamificationProvider>
           <BrowserRouter>
             <RouteSyncer />
             <Suspense fallback={<RouteLoading />}>
@@ -236,6 +242,7 @@ createRoot(document.getElementById("root")!).render(
                   <Route path="/book/:itemId" element={<Checkout />} />
                   <Route path="/bookings" element={<Bookings />} />
                   <Route path="/timer" element={<StudyTimer />} />
+                  <Route path="/performance" element={<Performance />} />
                   <Route path="/admin" element={<Admin />} />
                 </Route>
                 {/* Sandbox: not linked from any nav, public so an experiment can
@@ -246,7 +253,10 @@ createRoot(document.getElementById("root")!).render(
               </Routes>
             </Suspense>
           </BrowserRouter>
+          <TimerWidget />
           <Toaster />
+          </GamificationProvider>
+          </TargetsProvider>
             </StudyLogProvider>
           </WorkspaceProvider>
         </StudentOSProvider>

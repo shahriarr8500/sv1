@@ -10,6 +10,7 @@ import type { Subject, Chapter } from "./types";
 import { TARGETS_KEY, targetStore } from "./target-store";
 import { SYLLABUS, getSubject, getChapter, lookupItem } from "./syllabus";
 import { todayKey, weekStartKey, weekEndKey } from "./target-calendar";
+import { BASE_MISSION_XP } from "./gamification";
 
 export function loadTargets(): Target[] {
   return targetStore.load().targets;
@@ -43,7 +44,11 @@ export function itemLabel(itemId: string): string {
   return `${name ? `${name} · ` : ""}${item}`;
 }
 
-export function createDailyTarget(syllabusItemId: string, targetDate = todayKey()): Target {
+export function createDailyTarget(
+  syllabusItemId: string,
+  targetDate = todayKey(),
+  xp: number = BASE_MISSION_XP,
+): Target {
   return {
     id: `daily--${syllabusItemId}--${targetDate}`,
     syllabusItemId,
@@ -51,10 +56,15 @@ export function createDailyTarget(syllabusItemId: string, targetDate = todayKey(
     targetDate,
     createdAt: Date.now(),
     completed: false,
+    xp: Math.round(xp),
   };
 }
 
-export function createWeeklyTarget(syllabusItemId: string, weekStart = weekStartKey(new Date())): Target {
+export function createWeeklyTarget(
+  syllabusItemId: string,
+  weekStart = weekStartKey(new Date()),
+  xp: number = BASE_MISSION_XP,
+): Target {
   return {
     id: `weekly--${syllabusItemId}--${weekStart}`,
     syllabusItemId,
@@ -62,6 +72,7 @@ export function createWeeklyTarget(syllabusItemId: string, weekStart = weekStart
     weekStart,
     createdAt: Date.now(),
     completed: false,
+    xp: Math.round(xp),
   };
 }
 

@@ -19,6 +19,8 @@ export interface StudySession {
   startedAt: number;
   endedAt: number;
   durationSeconds: number;
+  /** Optional syllabus item this session was spent on. */
+  syllabusItemId?: string;
 }
 
 export interface ActiveTimer {
@@ -27,6 +29,26 @@ export interface ActiveTimer {
   startedAt: number;
   /** Set for countdown timers; absent for free counts. */
   targetSeconds?: number;
+  /** Optional syllabus item the session is being tracked against. */
+  syllabusItemId?: string;
+  /** Present while paused; absent while running. */
+  pausedAt?: number;
+  /** Total milliseconds spent paused so far. */
+  pausedMs?: number;
+}
+
+/**
+ * Active study seconds, excluding time spent paused.
+ *
+ * Exported so the Dashboard widget, the timer page and the countdown alarm all
+ * agree on the same number.
+ */
+export function activeElapsedSeconds(active: ActiveTimer | null, now = Date.now()): number {
+  if (!active) return 0;
+  const end = active.pausedAt ?? now;
+  const raw = end - active.startedAt;
+  const paused = active.pausedMs ?? 0;
+  return Math.max(0, Math.floor((raw - paused) / 1000));
 }
 
 export interface StudyLogState {
@@ -53,14 +75,23 @@ function load(): StudyLogState {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return emptyState();
     const parsed = JSON.parse(raw) as Partial<StudyLogState>;
-    return {
-      version: 1,
-      sessions: Array.isArray(parsed.sessions) ? parsed.sessions : [],
-      active:
-        parsed.active && typeof parsed.active === "object"
-          ? parsed.active
-          : null,
-    };
+    const sessions = Array.isArray(parsed.sessions)
+      ? parsed.sessions.filter(
+          (s): s is StudySession =>
+            !!s &&
+            typeof s === "object" &&
+            typeof (s as StudySession).id === "string" &&
+            typeof (s as StudySession).startedAt === "number" &&
+            typeof (s as StudySession).durationSeconds === "number",
+        )
+      : [];
+    const active =
+      parsed.active &&
+      typeof parsed.active === "object" &&
+      typeof parsed.active.startedAt === "number"
+        ? parsed.active
+        : null;
+    return { version: 1, sessions, active };
   } catch {
     return emptyState();
   }

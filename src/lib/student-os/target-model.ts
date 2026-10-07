@@ -17,6 +17,11 @@ export interface Target {
   readonly targetDate?: string;
   /** Weekly only — Monday-week start, ISO-local "YYYY-MM-DD". */
   readonly weekStart?: string;
+  /**
+   * XP this mission pays out. Derived from the syllabus when it is created;
+   * never edited afterwards, so the reward stays predictable.
+   */
+  readonly xp: number;
 }
 
 export function makeTargetId(): string {
