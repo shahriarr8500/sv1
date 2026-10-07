@@ -1,9 +1,9 @@
 /**
  * Welcome header — the 5-second answer to "what is this and what do I do?".
  *
- * Order matches the ideal loop: greet → show streak/level → show today →
- * one obvious next action. No shame language anywhere: a quiet day is
- * described as a fresh start, never as a failure.
+ * Order matches the ideal loop: greet → show streak/level → show today → one
+ * obvious next action. No shame language anywhere: a quiet day is described as
+ * a fresh start, never as a failure.
  */
 
 import { useMemo } from "react";
@@ -18,6 +18,7 @@ import {
   TrendingUp,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { FutureGoalChip } from "@/components/student-os/FutureGoalChip";
 import { Progress } from "@/components/ui/progress";
 import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
@@ -75,10 +76,7 @@ export function WelcomeHeader() {
   const studiedSeconds = useMemo(
     () =>
       log.sessions
-        .filter(
-          (session) =>
-            session.mode === "study" && isSameLocalDay(session.startedAt),
-        )
+        .filter((session) => session.mode === "study" && isSameLocalDay(session.startedAt))
         .reduce((total, session) => total + session.durationSeconds, 0),
     [log.sessions],
   );
@@ -91,7 +89,6 @@ export function WelcomeHeader() {
 
   const handlePrimary = () => {
     if (planned === 0) {
-      // Nothing planned yet — hand the student straight to the planner.
       window.dispatchEvent(new CustomEvent("student-os:add-mission"));
       return;
     }
@@ -104,7 +101,6 @@ export function WelcomeHeader() {
       return;
     }
     startTimer("study", "stopwatch", undefined, nextTarget.syllabusItemId);
-    // The loop says: start → study. Land on the timer, not back on the plan.
     navigate("/timer");
   };
 
@@ -151,6 +147,7 @@ export function WelcomeHeader() {
           </h1>
           <p className="mt-2 text-muted-foreground">
             {momentumLine(planned, completed)}
+            {planned === 0 ? " · your future goal lives here." : null}
           </p>
         </div>
 
@@ -197,10 +194,13 @@ export function WelcomeHeader() {
           </div>
         ) : null}
 
-        <Button className="mt-4 w-full cursor-pointer sm:w-auto" onClick={handlePrimary}>
-          {primaryLabel}
-          <ArrowRight className="size-3.5" aria-hidden />
-        </Button>
+        <div className="mt-4 flex flex-wrap items-stretch gap-2">
+          <Button className="flex-1 cursor-pointer" onClick={handlePrimary}>
+            {primaryLabel}
+            <ArrowRight className="size-3.5" aria-hidden />
+          </Button>
+          <FutureGoalChip />
+        </div>
       </div>
     </motion.section>
   );
