@@ -304,6 +304,8 @@ export function AppShell() {
 
   if (!profile) return <Navigate to="/onboarding" replace />;
 
+
+
   return (
     <div className="min-h-screen bg-background">
       <ImpersonationBanner />
