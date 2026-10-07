@@ -86,11 +86,11 @@ function NavRow({
 }
 
 function SidebarNav({
-  subjects,
+  subjects = useSelectedSubjects(),
   progressBySubject,
   onNavigate,
 }: {
-  subjects: ReturnType<typeof useSelectedSubjects>;
+  subjects?: ReturnType<typeof useSelectedSubjects>;
   progressBySubject: Map<string, number>;
   onNavigate?: () => void;
 }) {

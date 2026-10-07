@@ -6,6 +6,7 @@
  */
 
 import type { Target } from "./target-model";
+import type { Subject, Chapter } from "./types";
 import { TARGETS_KEY, targetStore } from "./target-store";
 import { SYLLABUS, getSubject, getChapter, lookupItem } from "./syllabus";
 import { todayKey, weekStartKey, weekEndKey } from "./target-calendar";
@@ -22,7 +23,7 @@ export function findTargetById(targets: Target[], id: string): Target | undefine
   return targets.find((t) => t.id === id);
 }
 
-export function subjectTreeForSelection(): { subject: typeof import("./types").Subject; chapters: Array<{ chapter: typeof import("./types").Chapter; selectedItems: string[] }> }[] {
+export function subjectTreeForSelection(): Array<{ subject: Subject; chapters: Array<{ chapter: Chapter; selectedItems: string[] }> }> {
   return SYLLABUS.map((subject) => ({
     subject,
     chapters: subject.chapters.map((chapter) => ({

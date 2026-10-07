@@ -1,11 +1,12 @@
 import { NavLink, useNavigate } from "react-router";
 import { cn } from "@/lib/utils";
 import { Briefcase, LayoutDashboard, Settings, User, Volume2 } from "lucide-react";
-import { useStudentOS } from "@/state/student-os";
+import { useStudentOS, useSubjectsForPaper } from "@/state/student-os";
+import type { Subject } from "@/lib/student-os/types";
 
 interface SidebarNavProps {
   onNavigate?: () => void;
-  subjects?: Array<{ id: string; paper: string; paperKey: "1st" | "2nd" }>;
+  paperView?: "1st" | "2nd" | "all";
   progressBySubject?: Map<string, number>;
 }
 
@@ -18,12 +19,12 @@ const TOP_LEVEL: Array<{ icon: React.ComponentType<{ size?: number; className?: 
 ];
 
 export function SidebarNav({
-  subjects,
+  paperView = "1st",
   progressBySubject,
   onNavigate,
 }: SidebarNavProps) {
   const navigate = useNavigate();
-  const { profile } = useStudentOS();
+  const subjects = useSubjectsForPaper(paperView);
 
   return (
     <nav className="flex flex-col gap-1 overflow-y-auto py-2" aria-label="Primary">
