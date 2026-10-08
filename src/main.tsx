@@ -147,119 +147,119 @@ createRoot(document.getElementById("root")!).render(
           defaultTheme="light"
           disableTransitionOnChange
         >
-        <StudentOSProvider>
-          <WorkspaceProvider>
-            <StudyLogProvider>
-          <TargetsProvider>
-          <GamificationProvider>
-          <BrowserRouter>
-            <RouteSyncer />
-            <Suspense fallback={<RouteLoading />}>
-              <Routes>
-                <Route path="/" element={<Landing />} />
-                <Route
-                  path="/auth"
-                  element={
-                    <AuthPage redirectAfterAuth="/dashboard" />
-                  }
-                />
-                <Route
-                  path="/access-pass"
-                  element={
-                    <RequireAuth
-                      title="Sign in to unlock Student OS V1"
-                      description="The access pass is checked after you sign in."
-                      redirectImmediately
-                    >
-                      <AccessPass />
-                    </RequireAuth>
-                  }
-                />
-                <Route
-                  path="/admin-entry"
-                  element={
-                    <RequireAuth
-                      title="Sign in to use the admin entry"
-                      description="The admin console is only available to signed-in users."
-                      redirectImmediately
-                    >
-                      <RequireAccessPass>
-                        <AdminEntry />
-                      </RequireAccessPass>
-                    </RequireAuth>
-                  }
-                />
-                <Route
-                  path="/admin-console"
-                  element={
-                    <RequireAuth
-                      title="Sign in to open the admin console"
-                      description="Account management is only available to signed-in users."
-                      redirectImmediately
-                    >
-                      <RequireAccessPass>
-                        <AdminConsole />
-                      </RequireAccessPass>
-                    </RequireAuth>
-                  }
-                />
-                <Route
-                  path="/onboarding"
-                  element={
-                    <RequireAuth
-                      title="Sign in to set up Student OS V1"
-                      description="Your goal and syllabus progress are tied to your account."
-                    >
-                      <RequireAccessPass>
-                        <Onboarding />
-                      </RequireAccessPass>
-                    </RequireAuth>
-                  }
-                />
-                <Route
-                  element={
-                    <RequireAuth
-                      title="Sign in to open Student OS V1"
-                      description="Your dashboard, syllabus, and progress live behind sign-in."
-                    >
-                      <RequireAccessPass>
-                        <AppShell />
-                      </RequireAccessPass>
-                    </RequireAuth>
-                  }
-                >
-                  <Route path="/dashboard" element={<Dashboard />} />
-                  <Route path="/syllabus/:subjectId" element={<Subject />} />
-                  <Route
-                    path="/syllabus/:subjectId/:chapterId"
-                    element={<Chapter />}
-                  />
-                  <Route path="/goal" element={<Goal />} />
-                  <Route path="/settings" element={<Settings />} />
-                  <Route path="/catalog" element={<Catalog />} />
-                  <Route path="/catalog/new" element={<CatalogNew />} />
-                  <Route path="/catalog/:itemId" element={<CatalogItem />} />
-                  <Route path="/book/:itemId" element={<Checkout />} />
-                  <Route path="/bookings" element={<Bookings />} />
-                  <Route path="/timer" element={<StudyTimer />} />
-                  <Route path="/performance" element={<Performance />} />
-                  <Route path="/admin" element={<Admin />} />
-                </Route>
-                {/* Sandbox: not linked from any nav, public so an experiment can
-                    be previewed without signing in. */}
-                <Route path="/labs" element={<Labs />} />
-                <Route path="/labs/:feature" element={<Labs />} />
-                <Route path="*" element={<NotFound />} />
-              </Routes>
-            </Suspense>
-          </BrowserRouter>
-          <TimerWidget />
-          <Toaster />
-          </GamificationProvider>
-          </TargetsProvider>
-            </StudyLogProvider>
-          </WorkspaceProvider>
-        </StudentOSProvider>
+          <StudentOSProvider>
+            <WorkspaceProvider>
+              <StudyLogProvider>
+                <TargetsProvider>
+                  <GamificationProvider>
+                    <BrowserRouter>
+                      <RouteSyncer />
+                      <Suspense fallback={<RouteLoading />}>
+                        <Routes>
+                          <Route path="/" element={<Landing />} />
+                          <Route
+                            path="/auth"
+                            element={
+                              <AuthPage redirectAfterAuth="/dashboard" />
+                            }
+                          />
+                          <Route
+                            path="/access-pass"
+                            element={
+                              <RequireAuth
+                                title="Sign in to unlock Student OS V1"
+                                description="The access pass is checked after you sign in."
+                                redirectImmediately
+                              >
+                                <AccessPass />
+                              </RequireAuth>
+                            }
+                          />
+                          <Route
+                            path="/admin-entry"
+                            element={
+                              <RequireAuth
+                                title="Sign in to use the admin entry"
+                                description="The admin console is only available to signed-in users."
+                                redirectImmediately
+                              >
+                                <RequireAccessPass>
+                                  <AdminEntry />
+                                </RequireAccessPass>
+                              </RequireAuth>
+                            }
+                          />
+                          <Route
+                            path="/admin-console"
+                            element={
+                              <RequireAuth
+                                title="Sign in to open the admin console"
+                                description="Account management is only available to signed-in users."
+                                redirectImmediately
+                              >
+                                <RequireAccessPass>
+                                  <AdminConsole />
+                                </RequireAccessPass>
+                              </RequireAuth>
+                            }
+                          />
+                          <Route
+                            path="/onboarding"
+                            element={
+                              <RequireAuth
+                                title="Sign in to set up Student OS V1"
+                                description="Your goal and syllabus progress are tied to your account."
+                              >
+                                <RequireAccessPass>
+                                  <Onboarding />
+                                </RequireAccessPass>
+                              </RequireAuth>
+                            }
+                          />
+                          <Route
+                            element={
+                              <RequireAuth
+                                title="Sign in to open Student OS V1"
+                                description="Your dashboard, syllabus, and progress live behind sign-in."
+                              >
+                                <RequireAccessPass>
+                                  <AppShell />
+                                </RequireAccessPass>
+                              </RequireAuth>
+                            }
+                          >
+                            <Route path="/dashboard" element={<Dashboard />} />
+                            <Route path="/syllabus/:subjectId" element={<Subject />} />
+                            <Route
+                              path="/syllabus/:subjectId/:chapterId"
+                              element={<Chapter />}
+                            />
+                            <Route path="/goal" element={<Goal />} />
+                            <Route path="/settings" element={<Settings />} />
+                            <Route path="/catalog" element={<Catalog />} />
+                            <Route path="/catalog/new" element={<CatalogNew />} />
+                            <Route path="/catalog/:itemId" element={<CatalogItem />} />
+                            <Route path="/book/:itemId" element={<Checkout />} />
+                            <Route path="/bookings" element={<Bookings />} />
+                            <Route path="/timer" element={<StudyTimer />} />
+                            <Route path="/performance" element={<Performance />} />
+                            <Route path="/admin" element={<Admin />} />
+                          </Route>
+                          {/* Sandbox: not linked from any nav, public so an experiment can
+                              be previewed without signing in. */}
+                          <Route path="/labs" element={<Labs />} />
+                          <Route path="/labs/:feature" element={<Labs />} />
+                          <Route path="*" element={<NotFound />} />
+                        </Routes>
+                      </Suspense>
+                    </BrowserRouter>
+                    <TimerWidget />
+                    <Toaster />
+                  </GamificationProvider>
+                </TargetsProvider>
+              </StudyLogProvider>
+            </WorkspaceProvider>
+          </StudentOSProvider>
         </ThemeProvider>
       </ConvexAuthProvider>
     </RootErrorBoundary>

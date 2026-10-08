@@ -9,7 +9,7 @@
  * Outside the game: no XP, no streak, no achievements.
  */
 
-import { useMemo, useRef, useState, useEffect } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   ChevronUp,
   Headphones,
@@ -239,20 +239,18 @@ export function QuranPlayer() {
               if (next) {
                 requestAnimationFrame(() => {
                   if (panel.current && typeof window !== "undefined") {
-                requestAnimationFrame(() => {
-                  if (panel.current) {
-                    if (window.scrollY === 0) {
-                      panel.current.scrollTop = 0;
-                    } else {
-                      panel.current.scrollTop = panel.current.scrollHeight;
-                    }
+                    requestAnimationFrame(() => {
+                      if (panel.current) {
+                        if (window.scrollY === 0) {
+                          panel.current.scrollTop = 0;
+                        } else {
+                          panel.current.scrollTop = panel.current.scrollHeight;
+                        }
+                      }
+                    });
                   }
                 });
               }
-                });
-              }
-
-              });
             }}
           >
             <ListMusic className="size-4" aria-hidden />
