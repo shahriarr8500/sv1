@@ -1,20 +1,25 @@
 /**
  * Today's Missions — the dashboard's daily mission system.
  *
+ * The card opens with a hero for the *current* mission: what to study, which
+ * chapter it belongs to, and one obvious button to start. Everything else
+ * (the full list, checking off, XP, perfect-day handling) is unchanged.
+ *
  * Each row is a real syllabus item planned for today. Checking one marks the
  * target complete, fills in the syllabus item if it is not already done, and
  * pays out the mission's XP exactly once. Unchecking only undoes the target.
  */
 
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { toast } from "sonner";
 import { celebrate } from "@/state/celebration";
 import {
   CheckCircle2,
-  Flame,
+  ListChecks,
   Play,
   Plus,
+  Sparkles,
   Target,
   X,
 } from "lucide-react";
@@ -24,7 +29,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
 import { AddMissionDialog } from "@/components/student-os/AddMissionDialog";
 import { lookupItem } from "@/lib/student-os/syllabus";
-import { perfectDayKeys, PERFECT_DAY_XP } from "@/lib/student-os/gamification";
+import { PERFECT_DAY_XP } from "@/lib/student-os/gamification";
+import { chapterLabel, itemLabel } from "@/lib/student-os/format";
 import { cn } from "@/lib/utils";
 import { useStudentOS } from "@/state/student-os";
 import { useStudyLog } from "@/state/study-log";
@@ -37,13 +43,44 @@ function todayKey(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+function isSameLocalDay(timestamp: number, now = new Date()): boolean {
+  const then = new Date(timestamp);
+  return (
+    then.getFullYear() === now.getFullYear() &&
+    then.getMonth() === now.getMonth() &&
+    then.getDate() === now.getDate()
+  );
+}
+
+function formatDuration(totalSeconds: number): string {
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  if (hours === 0) return `${minutes}m`;
+  return `${hours}h ${minutes}m`;
+}
+
+/** Minimal academic context Ashy receives — nothing private, nothing extra. */
+function ashyContextFor(parts: {
+  subject?: string;
+  chapter?: string;
+  item?: string;
+}): string {
+  const lines = [
+    parts.subject ? `Subject: ${parts.subject}` : null,
+    parts.chapter ? `Chapter: ${parts.chapter}` : null,
+    parts.item ? `Current topic: ${parts.item}` : null,
+  ].filter((line): line is string => Boolean(line));
+  return lines.join("\n");
+}
+
 export function TodayMissions() {
   const { targets, today } = useTargets();
   const { toggleMission, removeMission } = useMissionActions();
-  const { xpToday, level, streak } = useGamification();
-  const { active, startTimer } = useStudyLog();
+  const { xpToday, streak } = useGamification();
+  const { log, active, startTimer } = useStudyLog();
   const { completions } = useStudentOS();
   const [dialogOpen, setDialogOpen] = useState(false);
+  const navigate = useNavigate();
 
   // The welcome header's "Plan today's missions" CTA hands off here so the
   // student never has to hunt for the planner.
@@ -57,12 +94,6 @@ export function TodayMissions() {
   const planned = today.length;
   const completed = today.filter((t) => t.completed).length;
   const percent = planned === 0 ? 0 : Math.round((completed / planned) * 100);
-  const perfect = planned > 0 && completed === planned;
-
-  const isPerfectDay = useMemo(
-    () => perfectDayKeys(targets).has(key),
-    [targets, key],
-  );
 
   const rows = useMemo(
     () =>
@@ -73,6 +104,28 @@ export function TodayMissions() {
         }))
         .sort((a, b) => Number(a.target.completed) - Number(b.target.completed)),
     [today],
+  );
+
+  /** The one mission worth starting right now (first incomplete row). */
+  const heroRow = useMemo(
+    () => rows.find((row) => !row.target.completed) ?? null,
+    [rows],
+  );
+  const nextRow = useMemo(
+    () =>
+      rows.filter((row) => !row.target.completed).slice(1)[0] ?? null,
+    [rows],
+  );
+
+  const studiedSeconds = useMemo(
+    () =>
+      log.sessions
+        .filter(
+          (session) =>
+            session.mode === "study" && isSameLocalDay(session.startedAt),
+        )
+        .reduce((total, session) => total + session.durationSeconds, 0),
+    [log.sessions],
   );
 
   const handleToggle = (targetId: string, next: boolean) => {
@@ -120,10 +173,37 @@ export function TodayMissions() {
     toast("Session started", { description: "Tracking time against this mission." });
   };
 
+  /** Hero CTA: mission → timer → study → complete → progress. */
+  const handleHeroStart = () => {
+    if (!heroRow) return;
+    if (active) {
+      navigate("/timer");
+      return;
+    }
+    startTimer("study", "stopwatch", undefined, heroRow.target.syllabusItemId);
+    toast("Session started", {
+      description: `Studying ${heroRow.location?.item.title ?? "your mission"}.`,
+    });
+    navigate("/timer");
+  };
+
+  const heroLabel = (() => {
+    if (!heroRow) return "Start studying";
+    if (active && active.syllabusItemId === heroRow.target.syllabusItemId) {
+      return "Continue studying";
+    }
+    if (active) return "Go to timer";
+    return "Start studying";
+  })();
+
+  const heroLocation = heroRow?.location ?? null;
+  const nextLocation = nextRow?.location ?? null;
+  const allDone = planned > 0 && !heroRow;
+
   return (
     <>
       <Card className="gap-4">
-        <CardHeader>
+        <CardHeader className="gap-3">
           <div className="flex w-full flex-wrap items-start justify-between gap-3">
             <div className="space-y-1">
               <CardTitle className="flex items-center gap-2 text-lg">
@@ -144,48 +224,110 @@ export function TodayMissions() {
                         +{xpToday} XP earned
                       </span>
                     ) : null}
+                    {studiedSeconds > 0 ? (
+                      <span className="ml-2 text-muted-foreground">
+                        {formatDuration(studiedSeconds)} studied today
+                      </span>
+                    ) : null}
                   </>
                 )}
               </p>
             </div>
 
-            <div className="flex items-center gap-2">
-              <Link
-                to="/performance"
-                className="text-xs font-medium text-muted-foreground transition-colors hover:text-primary"
-              >
-                Performance
-              </Link>
-              <Button
-                size="sm"
-                className="cursor-pointer"
-                onClick={() => setDialogOpen(true)}
-              >
-                <Plus className="size-4" aria-hidden />
-                Add mission
-              </Button>
-            </div>
+            <Button
+              size="sm"
+              className="cursor-pointer"
+              onClick={() => setDialogOpen(true)}
+            >
+              <Plus className="size-4" aria-hidden />
+              Add mission
+            </Button>
           </div>
 
           {planned > 0 ? (
             <div className="space-y-1.5 pt-1">
               <Progress value={percent} aria-label="Mission progress" />
-              <div className="flex items-center justify-between text-xs text-muted-foreground">
-                <span className="tabular-nums">{percent}% of today&apos;s plan</span>
-                <span className="tabular-nums">
-                  Level {level.level} · {level.remaining} XP to next
-                </span>
-              </div>
-            </div>
-          ) : null}
-
-          {perfect || isPerfectDay ? (
-            <div className="flex items-center gap-2 rounded-lg border border-primary/40 bg-primary/10 px-3 py-2 text-sm font-medium text-primary">
-              <Flame className="size-4 shrink-0" aria-hidden />
-              {perfect ? `Perfect day — ${completed} / ${planned} missions complete` : "Perfect day logged"}
+              <p className="text-xs text-muted-foreground tabular-nums">
+                {percent}% of today&apos;s plan
+              </p>
             </div>
           ) : null}
         </CardHeader>
+
+        {/* Hero — the one mission worth starting right now. */}
+        {heroRow ? (
+          <CardContent className="pt-0">
+            <div className="rounded-xl border border-primary/30 bg-primary/[0.04] p-4 sm:p-5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="flex items-center gap-1.5 text-xs font-semibold tracking-wider text-primary uppercase">
+                  <ListChecks className="size-3.5" aria-hidden />
+                  Today&apos;s mission
+                </p>
+                {nextLocation ? (
+                  <p className="min-w-0 truncate text-xs text-muted-foreground">
+                    Next: {nextLocation.subject.name} ·{" "}
+                    {chapterLabel(nextLocation.chapter)}
+                  </p>
+                ) : null}
+              </div>
+
+              <p className="mt-2.5 text-lg font-semibold tracking-tight sm:text-xl">
+                {heroLocation?.subject.name ?? "Syllabus"}
+              </p>
+              <p className="mt-0.5 text-sm text-muted-foreground">
+                {heroLocation ? chapterLabel(heroLocation.chapter) : ""}
+              </p>
+              <p className="mt-1 text-sm font-medium text-primary">
+                {heroLocation
+                  ? itemLabel(heroLocation.item)
+                  : heroRow.target.syllabusItemId}
+              </p>
+
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                <Button className="cursor-pointer" onClick={handleHeroStart}>
+                  <Play className="size-4" aria-hidden />
+                  {heroLabel}
+                </Button>
+                <Button variant="outline" className="cursor-pointer" asChild>
+                  <Link
+                    to={`/ashy?context=${encodeURIComponent(
+                      ashyContextFor({
+                        subject: heroLocation?.subject.name,
+                        chapter: heroLocation
+                          ? chapterLabel(heroLocation.chapter)
+                          : undefined,
+                        item: heroLocation
+                          ? itemLabel(heroLocation.item)
+                          : undefined,
+                      }),
+                    )}`}
+                  >
+                    <Sparkles className="size-3.5" aria-hidden />
+                    Ask Ashy
+                  </Link>
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        ) : allDone ? (
+          <CardContent className="pt-0">
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-primary/40 bg-primary/10 p-4">
+              <p className="flex items-center gap-2 text-sm font-medium text-primary">
+                <CheckCircle2 className="size-4 shrink-0" aria-hidden />
+                All {planned} mission{planned === 1 ? "" : "s"} complete.
+                Your progress is updated.
+              </p>
+              <Button
+                size="sm"
+                variant="outline"
+                className="cursor-pointer"
+                onClick={() => navigate("/performance")}
+              >
+                View progress
+              </Button>
+            </div>
+          </CardContent>
+        ) : null}
 
         <CardContent className="space-y-2">
           {rows.length === 0 ? (
@@ -212,6 +354,7 @@ export function TodayMissions() {
                   typeof completions[target.syllabusItemId] === "number";
                 const studyingHere =
                   active?.syllabusItemId === target.syllabusItemId;
+                const isHero = heroRow?.target.id === target.id;
                 return (
                   <li
                     key={target.id}
@@ -219,7 +362,9 @@ export function TodayMissions() {
                       "group flex items-start gap-3 rounded-lg border px-3 py-2.5 transition-colors",
                       done
                         ? "border-primary/30 bg-primary/5"
-                        : "hover:border-primary/30 hover:bg-accent/40",
+                        : isHero
+                          ? "border-primary/30"
+                          : "hover:border-primary/30 hover:bg-accent/40",
                     )}
                   >
                     <Checkbox
@@ -276,7 +421,6 @@ export function TodayMissions() {
                             Already in syllabus
                           </span>
                         ) : null}
-
                       </div>
                     </div>
 

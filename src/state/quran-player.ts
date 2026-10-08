@@ -14,6 +14,8 @@ export interface QuranPlayerState {
 }
 
 const VOLUME_KEY = "student-os:quran-volume";
+/** Which surah is selected and whether the panel is open, across reloads. */
+const STATE_KEY = "student-os:quran-player:v1";
 
 function readVolume(): number {
   try {
@@ -26,16 +28,46 @@ function readVolume(): number {
   }
 }
 
+function readStoredState(): { surah: number; expanded: boolean } {
+  try {
+    const raw = localStorage.getItem(STATE_KEY);
+    if (!raw) return { surah: 1, expanded: false };
+    const parsed = JSON.parse(raw) as { surah?: unknown; expanded?: unknown };
+    const surah = Number(parsed.surah);
+    return {
+      surah:
+        Number.isFinite(surah) && surah >= 1 && surah <= SURAHS.length
+          ? Math.round(surah)
+          : 1,
+      expanded: parsed.expanded === true,
+    };
+  } catch {
+    return { surah: 1, expanded: false };
+  }
+}
+
+function persistState(surah: number, expanded: boolean): void {
+  try {
+    localStorage.setItem(
+      STATE_KEY,
+      JSON.stringify({ surah, expanded }),
+    );
+  } catch {
+    /* storage is optional */
+  }
+}
+
 let audio: HTMLAudioElement | null = null;
+const storedState = readStoredState();
 let snapshot: QuranPlayerState = {
-  surah: 1,
+  surah: storedState.surah,
   playing: false,
   loading: false,
   currentTime: 0,
   duration: 0,
   volume: readVolume(),
   muted: false,
-  expanded: false,
+  expanded: storedState.expanded,
   error: null,
 };
 
@@ -99,6 +131,20 @@ export function useQuranPlayer(): QuranPlayerState {
 }
 
 export const quranPlayer = {
+  /** Points the player at a surah without starting playback. */
+  select(surah: number): void {
+    const clamped = Math.min(Math.max(1, surah), SURAHS.length);
+    if (snapshot.surah === clamped && audio) return;
+    const element = ensureAudio();
+    if (!element) return;
+    if (element.src !== surahAudioUrl(clamped)) {
+      element.src = surahAudioUrl(clamped);
+      element.currentTime = 0;
+    }
+    emit({ surah: clamped, currentTime: 0, duration: 0, error: null });
+    persistState(clamped, snapshot.expanded);
+  },
+
   play(surah: number): void {
     const element = ensureAudio();
     if (!element) return;
@@ -108,6 +154,7 @@ export const quranPlayer = {
       element.src = surahAudioUrl(clamped);
       element.currentTime = 0;
       emit({ surah: clamped, currentTime: 0, duration: 0, error: null });
+      persistState(clamped, snapshot.expanded);
     } else if (!element.src) {
       element.src = surahAudioUrl(clamped);
     }
@@ -187,6 +234,7 @@ export const quranPlayer = {
 
   setExpanded(expanded: boolean): void {
     emit({ expanded });
+    persistState(snapshot.surah, expanded);
   },
 
   clearError(): void {

@@ -7,7 +7,7 @@
  * student saved in onboarding or Settings — never a hardcoded default.
  */
 
-import { BookOpen, Check, Edit, X } from "lucide-react";
+import { Check, Edit, Target, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -40,12 +40,12 @@ export function FutureGoalChip() {
           className="inline-flex items-center gap-2 rounded-lg border border-slate-700/60 bg-[#2c3545] px-2.5 py-1.5 text-xs font-medium text-sky-300"
           aria-hidden="false"
         >
-          <BookOpen className="size-3.5" aria-hidden />
+          <Target className="size-3.5" aria-hidden />
           <span className="sr-only">Goal</span>
         </span>
 
         <span className="font-semibold tracking-wide text-white/90 uppercase text-xs">
-          Daily Guidance
+          Goal
         </span>
 
         <span className="min-w-0 flex-1">
@@ -55,9 +55,7 @@ export function FutureGoalChip() {
               {targetDraft ? ` · ${targetDraft}` : null}
             </span>
           ) : (
-            <span className="text-white/70">
-              “Raise my rank.” — Quran 58:11
-            </span>
+            <span className="text-white/70">No goal set yet</span>
           )}
         </span>
 
@@ -120,7 +118,7 @@ export function FutureGoalChip() {
         className="inline-flex items-center gap-2 rounded-lg border border-slate-700/60 bg-[#2c3545] px-2.5 py-1.5 text-xs font-medium text-sky-300"
         aria-hidden="false"
       >
-        <BookOpen className="size-3.5" aria-hidden />
+        <Target className="size-3.5" aria-hidden />
         <span className="sr-only">Goal</span>
       </span>
 

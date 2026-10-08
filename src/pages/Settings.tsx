@@ -50,15 +50,23 @@ export default function SettingsPage() {
           Settings
         </h1>
         <p className="mt-1.5 text-muted-foreground">
-          Manage your goal, appearance, and account.
+          Manage your study setup, appearance, and account.
         </p>
       </div>
+
+      <section aria-labelledby="settings-study-heading" className="space-y-3">
+        <h2
+          id="settings-study-heading"
+          className="text-xs font-semibold tracking-wider text-muted-foreground uppercase"
+        >
+          Study
+        </h2>
 
       <Card className="gap-4">
         <CardHeader>
           <div className="flex w-full flex-wrap items-start justify-between gap-3">
             <div className="space-y-1.5">
-              <CardTitle className="text-base">Goal</CardTitle>
+              <CardTitle className="text-base">Goal & subjects</CardTitle>
               <p className="text-sm text-muted-foreground">
                 Change your goal, target, exam, education, curriculum, and
                 subjects.
@@ -82,6 +90,15 @@ export default function SettingsPage() {
           <span className="text-sm text-muted-foreground">{profile.exam}</span>
         </CardContent>
       </Card>
+      </section>
+
+      <section aria-labelledby="settings-appearance-heading" className="space-y-3">
+        <h2
+          id="settings-appearance-heading"
+          className="text-xs font-semibold tracking-wider text-muted-foreground uppercase"
+        >
+          Appearance
+        </h2>
 
       <Card className="gap-4">
         <CardHeader>
@@ -134,9 +151,17 @@ export default function SettingsPage() {
           </div>
         </CardContent>
       </Card>
+      </section>
 
       {isAdmin ? (
-        <Card className="gap-4 border-primary/30">
+        <section aria-labelledby="settings-admin-heading" className="space-y-3">
+          <h2
+            id="settings-admin-heading"
+            className="text-xs font-semibold tracking-wider text-muted-foreground uppercase"
+          >
+            Admin
+          </h2>
+          <Card className="gap-4 border-primary/30">
           <CardHeader>
             <div className="flex w-full flex-wrap items-start justify-between gap-3">
               <div className="space-y-1.5">
@@ -160,7 +185,16 @@ export default function SettingsPage() {
             </div>
           </CardHeader>
         </Card>
+        </section>
       ) : null}
+
+      <section aria-labelledby="settings-account-heading" className="space-y-3">
+        <h2
+          id="settings-account-heading"
+          className="text-xs font-semibold tracking-wider text-muted-foreground uppercase"
+        >
+          Account
+        </h2>
 
       <Card className="gap-4">
         <CardHeader>
@@ -205,6 +239,7 @@ export default function SettingsPage() {
           </p>
         </CardContent>
       </Card>
+      </section>
     </motion.div>
   );
 }

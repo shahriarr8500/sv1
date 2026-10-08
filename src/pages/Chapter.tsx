@@ -1,5 +1,6 @@
 import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
+import { Button } from "@/components/ui/button";
 import { chapterTitle, itemLabel } from "@/lib/student-os/format";
 import {
   calculateChapterProgress,
@@ -9,7 +10,7 @@ import { getChapter, getSubject } from "@/lib/student-os/syllabus";
 import { cn } from "@/lib/utils";
 import { isSubjectTracked, useStudentOS } from "@/state/student-os";
 import { motion } from "framer-motion";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, Navigate, useParams } from "react-router";
 
@@ -77,9 +78,22 @@ export default function ChapterPage() {
               completed
             </p>
           </div>
-          <span className="text-4xl leading-none font-bold tracking-tight tabular-nums text-primary">
-            {progress.percent}%
-          </span>
+
+          <div className="flex flex-col items-start gap-3 sm:items-end">
+            <span className="text-4xl leading-none font-bold tracking-tight tabular-nums text-primary">
+              {progress.percent}%
+            </span>
+            <Button variant="outline" size="sm" className="cursor-pointer" asChild>
+              <Link
+                to={`/ashy?context=${encodeURIComponent(
+                  `Subject: ${subject.name}\nChapter: ${chapterTitle(chapter)}`,
+                )}`}
+              >
+                <Sparkles className="size-3.5" aria-hidden />
+                Ask Ashy about this chapter
+              </Link>
+            </Button>
+          </div>
         </div>
 
         <Progress

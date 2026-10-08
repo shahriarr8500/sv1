@@ -16,6 +16,7 @@ import { ConvexReactClient } from "convex/react";
 import React, { StrictMode, useEffect, lazy, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes, useLocation } from "react-router";
+import { Loader2 } from "lucide-react";
 import "./index.css";
 
 // Lazy load route components for better code splitting
@@ -26,6 +27,10 @@ const AdminEntry = lazy(() => import("./pages/AdminEntry"));
 const AdminConsole = lazy(() => import("./pages/AdminConsole"));
 const Onboarding = lazy(() => import("./pages/Onboarding"));
 const Dashboard = lazy(() => import("./pages/Dashboard"));
+const Missions = lazy(() => import("./pages/Missions"));
+const SyllabusIndex = lazy(() => import("./pages/Syllabus"));
+const QuranPage = lazy(() => import("./pages/Quran"));
+const Ashy = lazy(() => import("./pages/Ashy"));
 const Subject = lazy(() => import("./pages/Subject"));
 const Chapter = lazy(() => import("./pages/Chapter"));
 const Goal = lazy(() => import("./pages/Goal"));
@@ -42,11 +47,14 @@ const Performance = lazy(() => import("./pages/Performance"));
 const Labs = lazy(() => import("./labs/Labs"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
-// Simple loading fallback for route transitions
+// Quiet loading state for route transitions — a spinner, never a flash of text.
 function RouteLoading() {
   return (
-    <div className="min-h-screen flex items-center justify-center">
-      <div className="animate-pulse text-muted-foreground">Loading...</div>
+    <div className="flex min-h-[50vh] items-center justify-center">
+      <Loader2
+        className="size-5 animate-spin text-muted-foreground"
+        aria-label="Loading"
+      />
     </div>
   );
 }
@@ -256,6 +264,10 @@ export function StudentOSApp() {
       <Routes>
         <Route element={<AppShell />}>
           <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/missions" element={<Missions />} />
+          <Route path="/syllabus" element={<SyllabusIndex />} />
+          <Route path="/quran" element={<QuranPage />} />
+          <Route path="/ashy" element={<Ashy />} />
           <Route path="/syllabus/:subjectId" element={<Subject />} />
           <Route
             path="/syllabus/:subjectId/:chapterId"

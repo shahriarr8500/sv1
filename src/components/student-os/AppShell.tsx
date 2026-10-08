@@ -20,18 +20,25 @@ import { calculateSubjectProgress } from "@/lib/student-os/progress";
 import type { Subject } from "@/lib/student-os/types";
 import { cn } from "@/lib/utils";
 import { useSelectedSubjects, useStudentOS, useSubjectsForPaper } from "@/state/student-os";
+import { api } from "@/convex/_generated/api";
+import { useQuery } from "convex/react";
 import {
   BarChart3,
+  BookOpen,
   CalendarCheck,
-  LayoutDashboard,
+  Headphones,
+  Home,
   LayoutGrid,
+  ListChecks,
   Loader2,
   LogOut,
   Menu,
   Settings,
   ShieldCheck,
+  Sparkles,
   Target,
   Timer,
+  User,
   UserCog,
   type LucideIcon,
 } from "lucide-react";
@@ -70,6 +77,14 @@ function NavRow({ entry, end, onNavigate }: { entry: NavEntry; end?: boolean; on
   );
 }
 
+function SectionLabel({ children }: { children: ReactNode }) {
+  return (
+    <p className="mt-6 mb-1.5 px-3 text-[11px] font-semibold tracking-wider text-muted-foreground uppercase first:mt-0">
+      {children}
+    </p>
+  );
+}
+
 function SidebarNav({
   subjects,
   progressBySubject,
@@ -79,24 +94,26 @@ function SidebarNav({
   progressBySubject: Map<string, number>;
   onNavigate?: () => void;
 }) {
+  // Admin is role-gated server-side; normal students never see it.
+  const isAdmin = useQuery(api.admin.isAdmin) === true;
+
   return (
     <nav className="flex-1 overflow-y-auto px-3 py-4" aria-label="Main navigation">
+      <SectionLabel>Main</SectionLabel>
       <ul className="space-y-1">
         <NavRow
           end
           onNavigate={onNavigate}
-          entry={{ to: "/dashboard", label: "Dashboard", icon: LayoutDashboard }}
+          entry={{ to: "/dashboard", label: "Home", icon: Home }}
         />
         <NavRow
           onNavigate={onNavigate}
-          entry={{ to: "/performance", label: "Performance", icon: BarChart3 }}
+          entry={{ to: "/missions", label: "Missions", icon: ListChecks }}
         />
-      </ul>
-
-      <p className="mt-6 mb-1.5 px-3 text-[11px] font-semibold tracking-wider text-muted-foreground uppercase">
-        Syllabus
-      </p>
-      <ul className="space-y-1">
+        <NavRow
+          onNavigate={onNavigate}
+          entry={{ to: "/syllabus", label: "Syllabus", icon: BookOpen }}
+        />
         {subjects.map((subject) => {
           const paperLinks = (["1st", "2nd"] as const)
             .map((paperKey) => getSiblingPaperSubject(subject, paperKey))
@@ -142,9 +159,30 @@ function SidebarNav({
             </li>
           );
         })}
+        <NavRow
+          onNavigate={onNavigate}
+          entry={{ to: "/performance", label: "Progress", icon: BarChart3 }}
+        />
+        <NavRow
+          onNavigate={onNavigate}
+          entry={{ to: "/timer", label: "Study", icon: Timer }}
+        />
+        <NavRow
+          onNavigate={onNavigate}
+          entry={{ to: "/ashy", label: "Ashy", icon: Sparkles }}
+        />
+        <NavRow
+          onNavigate={onNavigate}
+          entry={{ to: "/quran", label: "Quran", icon: Headphones }}
+        />
       </ul>
 
-      <ul className="mt-6 space-y-1">
+      <SectionLabel>More</SectionLabel>
+      <ul className="space-y-1">
+        <NavRow
+          onNavigate={onNavigate}
+          entry={{ to: "/goal", label: "Goal", icon: Target }}
+        />
         <NavRow
           onNavigate={onNavigate}
           entry={{ to: "/catalog", label: "Catalog", icon: LayoutGrid }}
@@ -155,26 +193,73 @@ function SidebarNav({
         />
         <NavRow
           onNavigate={onNavigate}
-          entry={{ to: "/timer", label: "Study hours", icon: Timer }}
-        />
-        <NavRow onNavigate={onNavigate} entry={{ to: "/goal", label: "Goal", icon: Target }} />
-        <NavRow
-          onNavigate={onNavigate}
           entry={{ to: "/settings", label: "Settings", icon: Settings }}
         />
       </ul>
 
-      <div className="mt-6 border-t pt-4">
-        <p className="px-3 pb-1.5 text-[11px] font-semibold tracking-wider text-muted-foreground uppercase">
-          Business
-        </p>
-        <ul>
-          <NavRow
-            onNavigate={onNavigate}
-            entry={{ to: "/admin", label: "Admin", icon: ShieldCheck }}
-          />
-        </ul>
-      </div>
+      {isAdmin ? (
+        <div className="mt-6 border-t pt-4">
+          <p className="px-3 pb-1.5 text-[11px] font-semibold tracking-wider text-muted-foreground uppercase">
+            Business
+          </p>
+          <ul>
+            <NavRow
+              onNavigate={onNavigate}
+              entry={{ to: "/admin", label: "Admin", icon: ShieldCheck }}
+            />
+          </ul>
+        </div>
+      ) : null}
+    </nav>
+  );
+}
+
+/** Fixed one-hand bottom navigation for phones — Home, Missions, Syllabus, Me. */
+function MobileTabBar() {
+  const tabs: Array<{ to: string; label: string; icon: LucideIcon; end?: boolean }> = [
+    { to: "/dashboard", label: "Home", icon: Home, end: true },
+    { to: "/missions", label: "Missions", icon: ListChecks },
+    { to: "/syllabus", label: "Syllabus", icon: BookOpen },
+    { to: "/settings", label: "Me", icon: User },
+  ];
+
+  return (
+    <nav
+      aria-label="Primary"
+      className="fixed inset-x-0 bottom-0 z-40 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/85 lg:hidden"
+      style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+    >
+      <ul className="mx-auto grid h-16 max-w-lg grid-cols-4">
+        {tabs.map((tab) => (
+          <li key={tab.to}>
+            <NavLink
+              to={tab.to}
+              end={tab.end}
+              className={({ isActive }) =>
+                cn(
+                  "relative flex h-full flex-col items-center justify-center gap-1 text-[11px] font-medium transition-colors",
+                  isActive
+                    ? "text-primary"
+                    : "text-muted-foreground hover:text-foreground",
+                )
+              }
+            >
+              {({ isActive }) => (
+                <>
+                  <tab.icon className="size-5" aria-hidden />
+                  <span>{tab.label}</span>
+                  {isActive ? (
+                    <span
+                      aria-hidden
+                      className="absolute bottom-1 left-1/2 h-0.5 w-6 -translate-x-1/2 rounded-full bg-primary"
+                    />
+                  ) : null}
+                </>
+              )}
+            </NavLink>
+          </li>
+        ))}
+      </ul>
     </nav>
   );
 }
@@ -348,11 +433,12 @@ export function AppShell() {
       </Sheet>
 
       <div className="lg:pl-64">
-        <main className="mx-auto w-full max-w-6xl px-4 pt-6 pb-28 sm:px-6 lg:px-8 lg:pt-10">
+        <main className="mx-auto w-full max-w-6xl px-4 pt-6 pb-36 sm:px-6 lg:px-8 lg:pt-10 lg:pb-16">
           <Outlet />
         </main>
       </div>
 
+      <MobileTabBar />
       <FloatingQuranPlayer />
       <CompletionCelebration />
     </div>

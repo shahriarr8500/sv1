@@ -16,7 +16,7 @@ import {
 import { PCMB_SUBJECT_IDS, SYLLABUS } from "@/lib/student-os/syllabus";
 import { useStudentOS } from "@/state/student-os";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowLeft, ArrowRight } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check } from "lucide-react";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { Link, Navigate, useNavigate } from "react-router";
 
@@ -25,8 +25,7 @@ type Step =
   | "goal"
   | "target"
   | "exam"
-  | "education"
-  | "curriculum"
+  | "background"
   | "subjects"
   | "summary";
 
@@ -35,8 +34,7 @@ const STEPS: Step[] = [
   "goal",
   "target",
   "exam",
-  "education",
-  "curriculum",
+  "background",
   "subjects",
   "summary",
 ];
@@ -74,11 +72,10 @@ export default function OnboardingPage() {
         return exam.trim()
           ? null
           : "Please enter the exam or admission you're preparing for.";
-      case "education":
-        return educationLevel.trim()
-          ? null
-          : "Choose your current class or level — or pick Other and type it in.";
-      case "curriculum":
+      case "background":
+        if (!educationLevel.trim()) {
+          return "Choose your current class or level — or pick Other and type it in.";
+        }
         return curriculum.trim()
           ? null
           : "Choose your curriculum — or pick Other and type it in.";
@@ -111,8 +108,7 @@ export default function OnboardingPage() {
       validate("goal") ??
       validate("target") ??
       validate("exam") ??
-      validate("education") ??
-      validate("curriculum") ??
+      validate("background") ??
       validate("subjects");
     if (problem) {
       setError(problem);
@@ -268,24 +264,46 @@ export default function OnboardingPage() {
           onChange: setExam,
           examples: EXAM_EXAMPLES,
         });
-      case "education":
-        return choiceStep({
-          question: "What is your current class / level?",
-          hint: "Pick the closest match — or choose Other and type it yourself.",
-          options: EDUCATION_LEVEL_OPTIONS,
-          value: educationLevel,
-          onChange: setEducationLevel,
-          customPlaceholder: "Type your class or level",
-        });
-      case "curriculum":
-        return choiceStep({
-          question: "Which curriculum are you following?",
-          hint: "This shapes the syllabus data you'll track.",
-          options: CURRICULUM_OPTIONS,
-          value: curriculum,
-          onChange: setCurriculum,
-          customPlaceholder: "Type your curriculum",
-        });
+      case "background":
+        return (
+          <div className="space-y-6">
+            <div className="space-y-2">
+              <h2 className="text-2xl font-bold tracking-tight sm:text-3xl">
+                A bit about you
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                Your class and curriculum shape the syllabus Student OS
+                tracks for you.
+              </p>
+            </div>
+
+            <div className="space-y-2.5">
+              <p className="text-xs font-semibold tracking-wider text-muted-foreground uppercase">
+                Current class / level
+              </p>
+              <ChoiceSelect
+                options={EDUCATION_LEVEL_OPTIONS}
+                initialValue={educationLevel}
+                onChange={setEducationLevel}
+                customPlaceholder="Type your class or level"
+                ariaLabel="Current class or level"
+              />
+            </div>
+
+            <div className="space-y-2.5">
+              <p className="text-xs font-semibold tracking-wider text-muted-foreground uppercase">
+                Curriculum
+              </p>
+              <ChoiceSelect
+                options={CURRICULUM_OPTIONS}
+                initialValue={curriculum}
+                onChange={setCurriculum}
+                customPlaceholder="Type your curriculum"
+                ariaLabel="Curriculum"
+              />
+            </div>
+          </div>
+        );
       case "subjects":
         return (
           <div className="space-y-6">
@@ -309,16 +327,16 @@ export default function OnboardingPage() {
           <div className="space-y-6">
             <div className="space-y-2">
               <h2 className="text-2xl font-bold tracking-tight sm:text-3xl">
-                Ready to begin
+                Your Study Path
               </h2>
               <p className="text-sm text-muted-foreground">
-                Confirm your setup — you can change any of this later in
-                Settings.
+                This is the system you&apos;re creating — you can change any of
+                it later in Settings.
               </p>
             </div>
             <dl className="divide-y divide-border rounded-xl border bg-card">
-              {summaryRow("Your Goal", goal)}
-              {summaryRow("Your Target", target)}
+              {summaryRow("Goal", goal)}
+              {summaryRow("Target", target)}
               {summaryRow("Exam", exam)}
               {summaryRow("Education", educationLevel)}
               {summaryRow("Curriculum", curriculum)}
@@ -333,6 +351,10 @@ export default function OnboardingPage() {
                 </dd>
               </div>
             </dl>
+            <p className="flex items-center gap-2 text-sm font-medium text-primary">
+              <Check className="size-4" aria-hidden />
+              You&apos;re ready. Your first mission is waiting.
+            </p>
           </div>
         );
       }
@@ -412,7 +434,7 @@ export default function OnboardingPage() {
                       Back
                     </Button>
                     <Button type="submit" className="cursor-pointer">
-                      {step === "summary" ? "Start My Journey" : "Continue"}
+                      {step === "summary" ? "Start Student OS" : "Continue"}
                       {step === "summary" ? null : (
                         <ArrowRight className="size-4" aria-hidden />
                       )}
