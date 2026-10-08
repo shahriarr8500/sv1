@@ -1,1 +1,378 @@
-/**\n * Authenticated app frame: desktop sidebar + mobile drawer navigation.\n *\n * Also guards the app — visitors without a saved profile are sent to\n * onboarding instead of an empty dashboard.\n */\n\nimport { Button } from \"@/components/ui/button\";\nimport { StudentOsLogo } from \"@/components/student-os/StudentOsLogo\";\nimport { CompletionCelebration } from \"@/components/student-os/CompletionCelebration\";\nimport { FloatingQuranPlayer } from \"@/components/student-os/FloatingQuranPlayer\";\nimport {\n  Sheet,\n  SheetContent,\n  SheetDescription,\n  SheetTitle,\n} from \"@/components/ui/sheet\";\nimport { useAccountLabel } from \"@/hooks/use-account-label\";\nimport { useImpersonation } from \"@/hooks/use-impersonation\";\nimport { useSignOut } from \"@/hooks/use-sign-out\";\nimport { iconForSubject } from \"@/components/student-os/subject-icons\";\nimport { goalHeadline } from \"@/lib/student-os/format\";\nimport { getSiblingPaperSubject } from \"@/lib/student-os/syllabus\";\nimport { calculateSubjectProgress } from \"@/lib/student-os/progress\";\nimport type { Subject } from \"@/lib/student-os/types\";\nimport { cn } from \"@/lib/utils\";\nimport {\n  useSelectedSubjects,\n  useStudentOS,\n  useSubjectsForPaper,\n} from \"@/state/student-os\";\nimport {\n  BarChart3,\n  CalendarCheck,\n  LayoutDashboard,\n  LayoutGrid,\n  Loader2,\n  LogOut,\n  Menu,\n  Settings,\n  ShieldCheck,\n  Target,\n  Timer,\n  UserCog,\n  type LucideIcon,\n} from \"lucide-react\";\nimport { useEffect, useMemo, useRef, useState, type ReactNode } from \"react\";\nimport { Link, NavLink, Navigate, Outlet, useLocation } from \"react-router\";\n\ninterface NavEntry {\n  to: string;\n  label: string;\n  icon: LucideIcon;\n  /** Small trailing label (e.g. live progress percentage). */\n  trailing?: ReactNode;\n}\n\nfunction NavRow({\n  entry,\n  end,\n  onNavigate,\n}: {\n  entry: NavEntry;\n  end?: boolean;\n  onNavigate?: () => void;\n}) {\n  const Icon = entry.icon;\n  return (\n    <li>\n      <NavLink\n        to={entry.to}\n        end={end}\n        onClick={onNavigate}\n        className={({ isActive }) =>\n          cn(\n            \"flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors\",\n            isActive\n              ? \"bg-primary/10 font-medium text-primary\"\n              : \"text-muted-foreground hover:bg-accent hover:text-foreground\",\n          )\n        }\n      >\n        <Icon className=\"size-4 shrink-0\" aria-hidden />\n        <span className=\"min-w-0 flex-1 truncate\">{entry.label}</span>\n        {entry.trailing}\n      </NavLink>\n    </li>\n  );\n}\n\nfunction SidebarNav({\n  subjects,\n  progressBySubject,\n  onNavigate,\n}: {\n  /** Passed by AppShell — never defaulted to a hook call, which would make\n   *  hook order depend on whether the prop happened to be supplied. */\n  subjects: ReturnType<typeof useSelectedSubjects>;\n  progressBySubject: Map<string, number>;\n  onNavigate?: () => void;\n}) {\n  return (\n    <nav className=\"flex-1 overflow-y-auto px-3 py-4\" aria-label=\"Main navigation\">\n      <ul className=\"space-y-1\">\n        <NavRow\n          end\n          onNavigate={onNavigate}\n          entry={{ to: \"/dashboard\", label: \"Dashboard\", icon: LayoutDashboard }}\n        />\n        <NavRow\n          onNavigate={onNavigate}\n          entry={{ to: \"/performance\", label: \"Performance\", icon: BarChart3 }}\n        />\n      </ul>\n\n      <p className=\"mt-6 mb-1.5 px-3 text-[11px] font-semibold tracking-wider text-muted-foreground uppercase\">\n        Syllabus\n      </p>\n      <ul className=\"space-y-1\">\n        {subjects.map((subject) => {\n          const paperLinks = ([\"1st\", \"2nd\"] as const)\n            .map((paperKey) => getSiblingPaperSubject(subject, paperKey))\n            .filter((target): target is Subject => Boolean(target));\n          return (\n            <li key={subject.id}>\n              <NavRow\n                onNavigate={onNavigate}\n                entry={{\n                  to: `/syllabus/${subject.id}`,\n                  label: subject.name,\n                  icon: iconForSubject(subject.id),\n                  trailing: (\n                    <span className=\"text-[11px] font-medium tabular-nums opacity-70\">\n                      {progressBySubject.get(subject.id) ?? 0}%\n                    </span>\n                  ),\n                }}\n              />\n              <ul className=\"ml-6 mt-0.5 space-y-0.5 border-l pl-2\">\n                {paperLinks.map((target) => (\n                  <li key={target.id}>\n                    <NavLink\n                      to={`/syllabus/${target.id}`}\n                      onClick={onNavigate}\n                      className={({ isActive }) =>\n                        cn(\n                          \"flex cursor-pointer items-center justify-between rounded-md px-2 py-1 text-xs transition-colors\",\n                          isActive\n                            ? \"bg-primary/10 font-medium text-primary\"\n                            : \"text-muted-foreground hover:text-foreground\",\n                        )\n                      }\n                    >\n                      <span>{target.paper}</span>\n                      <span className=\"tabular-nums opacity-70\">\n                        {progressBySubject.get(target.id) ?? 0}%\n                      </span>\n                    </NavLink>\n                  </li>\n                ))}\n              </ul>\n            </li>\n          );\n        })}\n      </ul>\n\n      <ul className=\"mt-6 space-y-1\">\n        <NavRow\n          onNavigate={onNavigate}\n          entry={{ to: \"/catalog\", label: \"Catalog\", icon: LayoutGrid }}\n        />\n        <NavRow\n          onNavigate={onNavigate}\n          entry={{ to: \"/bookings\", label: \"My bookings\", icon: CalendarCheck }}\n        />\n        <NavRow\n          onNavigate={onNavigate}\n          entry={{ to: \"/timer\", label: \"Study hours\", icon: Timer }}\n        />\n        <NavRow onNavigate={onNavigate} entry={{ to: \"/goal\", label: \"Goal\", icon: Target }} />\n        <NavRow\n          onNavigate={onNavigate}\n          entry={{ to: \"/settings\", label: \"Settings\", icon: Settings }}\n        />\n      </ul>\n\n      <div className=\"mt-6 border-t pt-4\">\n        <p className=\"px-3 pb-1.5 text-[11px] font-semibold tracking-wider text-muted-foreground uppercase\">\n          Business\n        </p>\n        <ul>\n          <NavRow\n            onNavigate={onNavigate}\n            entry={{ to: \"/admin\", label: \"Admin\", icon: ShieldCheck }}\n          />\n        </ul>\n      </div>\n    </nav>\n  );\n}\n\nfunction AccountRow() {\n  const label = useAccountLabel();\n  const { profile } = useStudentOS();\n  const signOut = useSignOut();\n\n  const initial = label.charAt(0).toUpperCase();\n\n  return (\n    <div className=\"flex items-center gap-3 rounded-lg px-2 py-1.5\">\n      <span\n        aria-hidden\n        className=\"grid size-8 shrink-0 place-items-center rounded-full bg-primary/10 text-xs font-semibold text-primary\"\n      >\n        {initial}\n      </span>\n      <span className=\"min-w-0 flex-1\">\n        <span className=\"block truncate text-xs font-medium\">{label}</span>\n        {profile ? (\n          <span className=\"block truncate text-[11px] text-muted-foreground\">\n            {goalHeadline(profile)}\n          </span>\n        ) : null}\n      </span>\n      <Button\n        variant=\"ghost\"\n        size=\"icon-sm\"\n        aria-label=\"Sign out\"\n        title=\"Sign out\"\n        onClick={() => void signOut()}\n      >\n        <LogOut className=\"size-4\" aria-hidden />\n      </Button>\n    </div>\n  );\n}\n\nfunction ImpersonationBanner() {\n  const { isImpersonating, target, endImpersonation } = useImpersonation();\n\n  if (!isImpersonating || !target) return null;\n\n  const label = target.name || target.email || \"this account\";\n\n  return (\n    <div className=\"flex flex-wrap items-center justify-between gap-3 border-b bg-primary/10 px-4 py-2 text-sm lg:px-8\">\n      <p className=\"flex min-w-0 items-center gap-2\">\n        <UserCog className=\"size-4 shrink-0 text-primary\" aria-hidden />\n        <span className=\"truncate\">\n          You are logged in as <span className=\"font-semibold\">{label}</span>\n        </span>\n      </p>\n      <Button\n        size=\"sm\"\n        variant=\"outline\"\n        className=\"cursor-pointer\"\n        onClick={async () => {\n          if (await endImpersonation()) {\n            // Full reload so the app state returns to the admin's own account.\n            window.location.assign(\"/admin-console\");\n          }\n        }}\n      >\n        Stop and go back to my account\n      </Button>\n    </div>\n  );\n}\n\nfunction BrandMark() {\n  return (\n    <Link\n      to=\"/\"\n      className=\"flex cursor-pointer items-center gap-2.5 transition-opacity hover:opacity-80\"\n    >\n      <StudentOsLogo className=\"size-6 rounded-md\" />\n      <span className=\"text-sm font-bold tracking-tight\">Student OS V1</span>\n    </Link>\n  );\n}\n\nexport function AppShell() {\n  const { profile, completions, isStateLoading } = useStudentOS();\n  const subjects = useSelectedSubjects();\n  // Both papers, so the sidebar can show 1st/2nd progress per subject.\n  const paperSubjects = useSubjectsForPaper(\"all\");\n  const location = useLocation();\n  const mountedRef = useRef(false);\n  const [navOpen, setNavOpen] = useState(false);\n\n  // Keep the viewport at the top for route changes (hash targets scroll themselves).\n  useEffect(() => {\n    if (!location.hash) window.scrollTo({ top: 0 });\n  }, [location.pathname, location.hash]);\n\n  // Text direction for the floating player, set once on mount so SSR/initial\n  // render matches the first client paint.\n  useEffect(() => {\n    if (mountedRef.current) return;\n    mountedRef.current = true;\n    try {\n      document.documentElement.dir ?? (document.documentElement.dir = \"ltr\");\n    } catch {\n      /* not fatal */\n    }\n    setSafeAreaPadding();\n  }, []);\n  const progressBySubject = useMemo(() => {\n    const map = new Map<string, number>();\n    for (const subject of paperSubjects) {\n      const summary = calculateSubjectProgress(subject, completions);\n      map.set(subject.id, summary.percent);\n    }\n    return map;\n  }, [paperSubjects, completions]);\n\n  // An impersonated account's dashboard is still loading — don't bounce to\n  // onboarding on a null profile that is only null for a moment.\n  if (isStateLoading) {\n    return (\n      <div className=\"flex min-h-screen items-center justify-center bg-background\">\n        <Loader2 className=\"size-6 animate-spin text-muted-foreground\" />\n      </div>\n    );\n  }\n\n  if (!profile) return <Navigate to=\"/onboarding\" replace />;\n\n  return (\n    <div className=\"min-h-screen bg-background\">\n      <ImpersonationBanner />\n      {/* Mobile top bar */}\n      <header className=\"sticky top-0 z-40 flex h-14 items-center gap-3 border-b bg-background px-4 lg:hidden\">\n        <Button\n          variant=\"ghost\"\n          size=\"icon\"\n          aria-label=\"Open navigation\"\n          onClick={() => setNavOpen(true)}\n        >\n          <Menu className=\"size-5\" aria-hidden />\n        </Button>\n        <BrandMark />\n      </header>\n\n      {/* Desktop sidebar */}\n      <aside className=\"fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r bg-sidebar lg:flex\">\n        <div className=\"flex h-16 items-center border-b px-5\">\n          <BrandMark />\n        </div>\n        <SidebarNav\n          subjects={subjects}\n          progressBySubject={progressBySubject}\n          onNavigate={() => setNavOpen(false)}\n        />\n        <div className=\"border-t p-3\">\n          <AccountRow />\n        </div>\n      </aside>\n\n      {/* Mobile drawer */}\n      <Sheet open={navOpen} onOpenChange={setNavOpen}>\n        <SheetContent\n          side=\"left\"\n          className=\"w-72 gap-0 p-0 sm:max-w-72\"\n        >\n          <SheetTitle className=\"sr-only\">Student OS V1 navigation</SheetTitle>\n          <SheetDescription className=\"sr-only\">\n            Jump to your dashboard, subjects, goal, or settings.\n          </SheetDescription>\n          <div className=\"flex h-14 items-center border-b px-5\">\n            <BrandMark />\n          </div>\n          <SidebarNav\n            subjects={subjects}\n            progressBySubject={progressBySubject}\n            onNavigate={() => setNavOpen(false)}\n          />\n          <div className=\"border-t p-3\">\n            <AccountRow />\n          </div>\n        </SheetContent>\n      </Sheet>\n\n      {/* Content */}\n      <div className=\"lg:pl-64\">\n        <main className=\"mx-auto w-full max-w-6xl px-4 pt-6 pb-28 sm:px-6 lg:px-8 lg:pt-10\">\n          <Outlet />\n        </main>\n      </div>\n\n      {/* Persistent, route-surviving widgets. */}\n      <FloatingQuranPlayer />\n      <CompletionCelebration />\n    </div>\n  );\n}\n\n\nfunction setSafeAreaPadding() {\n  try {\n    if (typeof window === \"undefined\" || !document.documentElement) return;\n    const el = document.documentElement;\n    const safe = Number.parseFloat(\n      getComputedStyle(el).getPropertyValue(\"--quran-safe-bottom\").trim(),\n    );\n    if (Number.isFinite(safe) && safe > 0) {\n      el.style.paddingBottom = `${safe}px`;\n      el.style.setProperty(\"--quran-page-bottom\", `${safe}px`);\n    } else {\n      el.style.paddingBottom = \"\";\n      el.style.setProperty(\"--quran-page-bottom\", \"0px\");\n    }\n  } catch {\n    /* not fatal */\n  }\n}\n\n
+/**
+ * Authenticated app frame: desktop sidebar + mobile drawer navigation.
+ *
+ * Also guards the app — visitors without a saved profile are sent to
+ * onboarding instead of an empty dashboard.
+ */
+
+import { Button } from "@/components/ui/button";
+import { StudentOsLogo } from "@/components/student-os/StudentOsLogo";
+import { CompletionCelebration } from "@/components/student-os/CompletionCelebration";
+import { FloatingQuranPlayer } from "@/components/student-os/FloatingQuranPlayer";
+import { Sheet, SheetContent, SheetTitle, SheetDescription } from "@/components/ui/sheet";
+import { useAccountLabel } from "@/hooks/use-account-label";
+import { useImpersonation } from "@/hooks/use-impersonation";
+import { useSignOut } from "@/hooks/use-sign-out";
+import { iconForSubject } from "@/components/student-os/subject-icons";
+import { goalHeadline } from "@/lib/student-os/format";
+import { getSiblingPaperSubject } from "@/lib/student-os/syllabus";
+import { calculateSubjectProgress } from "@/lib/student-os/progress";
+import type { Subject } from "@/lib/student-os/types";
+import { cn } from "@/lib/utils";
+import { useSelectedSubjects, useStudentOS, useSubjectsForPaper } from "@/state/student-os";
+import {
+  BarChart3,
+  CalendarCheck,
+  LayoutDashboard,
+  LayoutGrid,
+  Loader2,
+  LogOut,
+  Menu,
+  Settings,
+  ShieldCheck,
+  Target,
+  Timer,
+  UserCog,
+  type LucideIcon,
+} from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Link, NavLink, Navigate, Outlet, useLocation } from "react-router";
+
+interface NavEntry {
+  to: string;
+  label: string;
+  icon: LucideIcon;
+  trailing?: ReactNode;
+}
+
+function NavRow({ entry, end, onNavigate }: { entry: NavEntry; end?: boolean; onNavigate?: () => void }) {
+  const Icon = entry.icon;
+  return (
+    <li>
+      <NavLink
+        to={entry.to}
+        end={end}
+        onClick={onNavigate}
+        className={({ isActive }) =>
+          cn(
+            "flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
+            isActive
+              ? "bg-primary/10 font-medium text-primary"
+              : "text-muted-foreground hover:bg-accent hover:text-foreground",
+          )
+        }
+      >
+        <Icon className="size-4 shrink-0" aria-hidden />
+        <span className="min-w-0 flex-1 truncate">{entry.label}</span>
+        {entry.trailing}
+      </NavLink>
+    </li>
+  );
+}
+
+function SidebarNav({
+  subjects,
+  progressBySubject,
+  onNavigate,
+}: {
+  subjects: ReturnType<typeof useSelectedSubjects>;
+  progressBySubject: Map<string, number>;
+  onNavigate?: () => void;
+}) {
+  return (
+    <nav className="flex-1 overflow-y-auto px-3 py-4" aria-label="Main navigation">
+      <ul className="space-y-1">
+        <NavRow
+          end
+          onNavigate={onNavigate}
+          entry={{ to: "/dashboard", label: "Dashboard", icon: LayoutDashboard }}
+        />
+        <NavRow
+          onNavigate={onNavigate}
+          entry={{ to: "/performance", label: "Performance", icon: BarChart3 }}
+        />
+      </ul>
+
+      <p className="mt-6 mb-1.5 px-3 text-[11px] font-semibold tracking-wider text-muted-foreground uppercase">
+        Syllabus
+      </p>
+      <ul className="space-y-1">
+        {subjects.map((subject) => {
+          const paperLinks = (["1st", "2nd"] as const)
+            .map((paperKey) => getSiblingPaperSubject(subject, paperKey))
+            .filter((target): target is Subject => Boolean(target));
+          return (
+            <li key={subject.id}>
+              <NavRow
+                onNavigate={onNavigate}
+                entry={{
+                  to: `/syllabus/${subject.id}`,
+                  label: subject.name,
+                  icon: iconForSubject(subject.id),
+                  trailing: (
+                    <span className="text-[11px] font-medium tabular-nums opacity-70">
+                      {progressBySubject.get(subject.id) ?? 0}%
+                    </span>
+                  ),
+                }}
+              />
+              <ul className="ml-6 mt-0.5 space-y-0.5 border-l pl-2">
+                {paperLinks.map((target) => (
+                  <li key={target.id}>
+                    <NavLink
+                      to={`/syllabus/${target.id}`}
+                      onClick={onNavigate}
+                      className={({ isActive }) =>
+                        cn(
+                          "flex cursor-pointer items-center justify-between rounded-md px-2 py-1 text-xs transition-colors",
+                          isActive
+                            ? "bg-primary/10 font-medium text-primary"
+                            : "text-muted-foreground hover:text-foreground",
+                        )
+                      }
+                    >
+                      <span>{target.paper}</span>
+                      <span className="tabular-nums opacity-70">
+                        {progressBySubject.get(target.id) ?? 0}%
+                      </span>
+                    </NavLink>
+                  </li>
+                ))}
+              </ul>
+            </li>
+          );
+        })}
+      </ul>
+
+      <ul className="mt-6 space-y-1">
+        <NavRow
+          onNavigate={onNavigate}
+          entry={{ to: "/catalog", label: "Catalog", icon: LayoutGrid }}
+        />
+        <NavRow
+          onNavigate={onNavigate}
+          entry={{ to: "/bookings", label: "My bookings", icon: CalendarCheck }}
+        />
+        <NavRow
+          onNavigate={onNavigate}
+          entry={{ to: "/timer", label: "Study hours", icon: Timer }}
+        />
+        <NavRow onNavigate={onNavigate} entry={{ to: "/goal", label: "Goal", icon: Target }} />
+        <NavRow
+          onNavigate={onNavigate}
+          entry={{ to: "/settings", label: "Settings", icon: Settings }}
+        />
+      </ul>
+
+      <div className="mt-6 border-t pt-4">
+        <p className="px-3 pb-1.5 text-[11px] font-semibold tracking-wider text-muted-foreground uppercase">
+          Business
+        </p>
+        <ul>
+          <NavRow
+            onNavigate={onNavigate}
+            entry={{ to: "/admin", label: "Admin", icon: ShieldCheck }}
+          />
+        </ul>
+      </div>
+    </nav>
+  );
+}
+
+function AccountRow() {
+  const label = useAccountLabel();
+  const { profile } = useStudentOS();
+  const signOut = useSignOut();
+  const initial = label.charAt(0).toUpperCase();
+
+  return (
+    <div className="flex items-center gap-3 rounded-lg px-2 py-1.5">
+      <span
+        aria-hidden
+        className="grid size-8 shrink-0 place-items-center rounded-full bg-primary/10 text-xs font-semibold text-primary"
+      >
+        {initial}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-xs font-medium">{label}</span>
+        {profile ? (
+          <span className="block truncate text-[11px] text-muted-foreground">
+            {goalHeadline(profile)}
+          </span>
+        ) : null}
+      </span>
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        aria-label="Sign out"
+        title="Sign out"
+        onClick={() => void signOut()}
+      >
+        <LogOut className="size-4" aria-hidden />
+      </Button>
+    </div>
+  );
+}
+
+function ImpersonationBanner() {
+  const { isImpersonating, target, endImpersonation } = useImpersonation();
+
+  if (!isImpersonating || !target) return null;
+
+  const label = target.name || target.email || "this account";
+
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-primary/10 px-4 py-2 text-sm lg:px-8">
+      <p className="flex min-w-0 items-center gap-2">
+        <UserCog className="size-4 shrink-0 text-primary" aria-hidden />
+        <span className="truncate">
+          You are logged in as <span className="font-semibold">{label}</span>
+        </span>
+      </p>
+      <Button
+        size="sm"
+        variant="outline"
+        className="cursor-pointer"
+        onClick={async () => {
+          if (await endImpersonation()) {
+            window.location.assign("/admin-console");
+          }
+        }}
+      >
+        Stop and go back to my account
+      </Button>
+    </div>
+  );
+}
+
+function BrandMark() {
+  return (
+    <Link
+      to="/"
+      className="flex cursor-pointer items-center gap-2.5 transition-opacity hover:opacity-80"
+    >
+      <StudentOsLogo className="size-6 rounded-md" />
+      <span className="text-sm font-bold tracking-tight">Student OS V1</span>
+    </Link>
+  );
+}
+
+export function AppShell() {
+  const { profile, completions, isStateLoading } = useStudentOS();
+  const subjects = useSelectedSubjects();
+  const paperSubjects = useSubjectsForPaper("all");
+  const location = useLocation();
+  const mountedRef = useRef(false);
+  const [navOpen, setNavOpen] = useState(false);
+
+  useEffect(() => {
+    if (!location.hash) window.scrollTo({ top: 0 });
+  }, [location.pathname, location.hash]);
+
+  useEffect(() => {
+    if (mountedRef.current) return;
+    mountedRef.current = true;
+    try {
+      document.documentElement.dir ?? (document.documentElement.dir = "ltr");
+    } catch {
+    }
+    setSafeAreaPadding();
+  }, []);
+
+  const progressBySubject = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const subject of paperSubjects) {
+      const summary = calculateSubjectProgress(subject, completions);
+      map.set(subject.id, summary.percent);
+    }
+    return map;
+  }, [paperSubjects, completions]);
+
+  if (isStateLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <Loader2 className="size-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (!profile) return <Navigate to="/onboarding" replace />;
+
+  return (
+    <div className="min-h-screen bg-background">
+      <ImpersonationBanner />
+      <header className="sticky top-0 z-40 flex h-14 items-center gap-3 border-b bg-background px-4 lg:hidden">
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Open navigation"
+          onClick={() => setNavOpen(true)}
+        >
+          <Menu className="size-5" aria-hidden />
+        </Button>
+        <BrandMark />
+      </header>
+
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r bg-sidebar lg:flex">
+        <div className="flex h-16 items-center border-b px-5">
+          <BrandMark />
+        </div>
+        <SidebarNav
+          subjects={subjects}
+          progressBySubject={progressBySubject}
+          onNavigate={() => setNavOpen(false)}
+        />
+        <div className="border-t p-3">
+          <AccountRow />
+        </div>
+      </aside>
+
+      <Sheet open={navOpen} onOpenChange={setNavOpen}>
+        <SheetContent side="left" className="w-72 gap-0 p-0 sm:max-w-72">
+          <SheetTitle className="sr-only">Student OS V1 navigation</SheetTitle>
+          <SheetDescription className="sr-only">
+            Jump to your dashboard, subjects, goal, or settings.
+          </SheetDescription>
+          <div className="flex h-14 items-center border-b px-5">
+            <BrandMark />
+          </div>
+          <SidebarNav
+            subjects={subjects}
+            progressBySubject={progressBySubject}
+            onNavigate={() => setNavOpen(false)}
+          />
+          <div className="border-t p-3">
+            <AccountRow />
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      <div className="lg:pl-64">
+        <main className="mx-auto w-full max-w-6xl px-4 pt-6 pb-28 sm:px-6 lg:px-8 lg:pt-10">
+          <Outlet />
+        </main>
+      </div>
+
+      <FloatingQuranPlayer />
+      <CompletionCelebration />
+    </div>
+  );
+}
+
+function setSafeAreaPadding() {
+  try {
+    if (typeof window === "undefined" || !document.documentElement) return;
+    const el = document.documentElement;
+    const safe = Number.parseFloat(
+      getComputedStyle(el).getPropertyValue("--quran-safe-bottom").trim(),
+    );
+    if (Number.isFinite(safe) && safe > 0) {
+      el.style.paddingBottom = `${safe}px`;
+      el.style.setProperty("--quran-page-bottom", `${safe}px`);
+    } else {
+      el.style.paddingBottom = "";
+      el.style.setProperty("--quran-page-bottom", "0px");
+    }
+  } catch {
+  }
+}
