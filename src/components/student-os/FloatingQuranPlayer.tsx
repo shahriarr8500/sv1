@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
-import { SURAHS } from "@/lib/student-os/quran";
+import { SURAHS, surahAudioUrl, surahName } from "@/lib/student-os/quran";
 import { cn } from "@/lib/utils";
 import { quranPlayer, useQuranPlayer } from "@/state/quran-player";
 
@@ -29,7 +29,8 @@ function readStored(): { surah: number; expanded: boolean } {
       (parsed.surah as number) <= SURAHS.length
         ? (parsed.surah as number)
         : 1;
-    return { surah: surahNumber, expanded: parsed.expanded === true };
+    const expanded = parsed.expanded === true;
+    return { surah: surahNumber, expanded };
   } catch {
     return { surah: 1, expanded: false };
   }
@@ -64,20 +65,24 @@ export function FloatingQuranPlayer() {
   const [error, setError] = useState<string | null>(null);
   const panel = useRef<HTMLDivElement | null>(null);
 
+  // Restore the last opened surah once the state has settled.
   useEffect(() => {
     const stored = readStored();
     if (state.surah !== stored.surah) {
       quranPlayer.play(stored.surah);
     }
+    // Keep the open/closed decision in sync with what we persist.
     if (expanded !== stored.expanded) {
       setExpanded(stored.expanded);
     }
   }, []);
 
+  // Persist open/closed and the last played surah when either changes.
   useEffect(() => {
     writeStored(state.surah, expanded);
   }, [state.surah, expanded]);
 
+  // Keep the panel width clamped as the window resizes.
   useEffect(() => {
     const update = () => {
       const next = Math.min(360, Math.max(320, window.innerWidth - 32));
