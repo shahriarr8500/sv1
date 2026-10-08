@@ -18,17 +18,11 @@ import { quranPlayer, useQuranPlayer } from "@/state/quran-player";
 
 const STORAGE_KEY = "student-os:quran-player:v1";
 
-function readStored(): {
-  surah: number;
-  expanded: boolean;
-} {
+function readStored(): { surah: number; expanded: boolean } {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return { surah: 1, expanded: false };
-    const parsed = JSON.parse(raw) as {
-      surah?: unknown;
-      expanded?: unknown;
-    };
+    const parsed = JSON.parse(raw) as { surah?: unknown; expanded?: unknown };
     const surahNumber =
       Number.isFinite(parsed.surah as number) &&
       (parsed.surah as number) >= 1 &&
@@ -45,7 +39,10 @@ function writeStored(surah: number, expanded: boolean): void {
   try {
     localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ surah: Math.max(1, Math.min(SURAHS.length, surah)), expanded }),
+      JSON.stringify({
+        surah: Math.max(1, Math.min(SURAHS.length, surah)),
+        expanded,
+      }),
     );
   } catch {
     /* storage is optional */
@@ -67,24 +64,20 @@ export function FloatingQuranPlayer() {
   const [error, setError] = useState<string | null>(null);
   const panel = useRef<HTMLDivElement | null>(null);
 
-  // Restore the last opened surah once the state has settled.
   useEffect(() => {
     const stored = readStored();
     if (state.surah !== stored.surah) {
       quranPlayer.play(stored.surah);
     }
-    // Keep the open/closed decision in sync with what we persist.
     if (expanded !== stored.expanded) {
       setExpanded(stored.expanded);
     }
   }, []);
 
-  // Persist open/closed and the last played surah when either changes.
   useEffect(() => {
     writeStored(state.surah, expanded);
   }, [state.surah, expanded]);
 
-  // Keep the panel width clamped as the window resizes.
   useEffect(() => {
     const update = () => {
       const next = Math.min(360, Math.max(320, window.innerWidth - 32));
@@ -120,10 +113,13 @@ export function FloatingQuranPlayer() {
   const results = useMemo(() => {
     const term = query.trim().toLowerCase();
     if (!term) return SURAHS.slice(0, 50);
-    return SURAHS.filter(
-      (surah) =>
-        surah.name.toLowerCase().includes(term) || String(surah.number) === term,
-    ).slice(0, 60);
+    return SURAHS
+      .filter(
+        (surah) =>
+          surah.name.toLowerCase().includes(term) ||
+          String(surah.number) === term,
+      )
+      .slice(0, 60);
   }, [query]);
 
   const current = SURAHS[state.surah - 1] ?? SURAHS[0];
@@ -217,7 +213,7 @@ export function FloatingQuranPlayer() {
                   className="cursor-pointer rounded-full p-1.5 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
                   onClick={() => quranPlayer.previous()}
                 >
-                  &lt;
+                  {"<"}
                 </button>
                 <button
                   type="button"
@@ -238,7 +234,7 @@ export function FloatingQuranPlayer() {
                   className="cursor-pointer rounded-full p-1.5 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
                   onClick={() => quranPlayer.next()}
                 >
-                  &gt;
+                  {">"}
                 </button>
                 <button
                   type="button"
@@ -298,7 +294,9 @@ export function FloatingQuranPlayer() {
                 className="h-9 pl-9"
               />
             </div>
-          </div>            <ul className="max-h-48 overflow-y-auto p-2">
+          </div>
+
+          <ul className="max-h-48 overflow-y-auto p-2">
             {results.length === 0 ? (
               <li className="px-2 py-6 text-center text-sm text-muted-foreground">
                 No Surah matches "{query}".
@@ -340,7 +338,6 @@ export function FloatingQuranPlayer() {
         aria-label={expanded ? "Hide Surah list" : "Show Surah list"}
         aria-expanded={expanded}
       >
-        {/* Marker ring so the tap area is obvious even when no audio is playing. */}
         <div
           className={cn(
             "pointer-events-none rounded-full ring-2 ring-offset-2 ring-offset-background transition-opacity",
