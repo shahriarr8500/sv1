@@ -110,7 +110,6 @@ class RootErrorBoundary extends React.Component<
 const convex = new ConvexReactClient(import.meta.env.VITE_CONVEX_URL as string);
 
 
-
 function RouteSyncer() {
   const location = useLocation();
   useEffect(() => {
@@ -160,7 +159,7 @@ createRoot(document.getElementById("root")!).render(
                           <Route
                             path="/auth"
                             element={
-                              <AuthPage redirectAfterAuth="/dashboard" />
+                              <AuthPage />
                             }
                           />
                           <Route
@@ -217,6 +216,7 @@ createRoot(document.getElementById("root")!).render(
                             }
                           />
                           <Route
+                            path="/*"
                             element={
                               <RequireAuth
                                 title="Sign in to open Student OS V1"
@@ -232,7 +232,6 @@ createRoot(document.getElementById("root")!).render(
                               be previewed without signing in. */}
                           <Route path="/labs" element={<Labs />} />
                           <Route path="/labs/:feature" element={<Labs />} />
-                          <Route path="*" element={<NotFound />} />
                         </Routes>
                       </Suspense>
                     </BrowserRouter>
@@ -253,29 +252,26 @@ createRoot(document.getElementById("root")!).render(
  *  changes never unmount them. */
 export function StudentOSApp() {
   return (
-    <BrowserRouter>
-      <RouteSyncer />
-      <Suspense fallback={<RouteLoading />}>
-        <Routes>
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/syllabus/:subjectId" element={<Subject />} />
-          <Route
-            path="/syllabus/:subjectId/:chapterId"
-            element={<Chapter />}
-          />
-          <Route path="/goal" element={<Goal />} />
-          <Route path="/settings" element={<Settings />} />
-          <Route path="/catalog" element={<Catalog />} />
-          <Route path="/catalog/new" element={<CatalogNew />} />
-          <Route path="/catalog/:itemId" element={<CatalogItem />} />
-          <Route path="/book/:itemId" element={<Checkout />} />
-          <Route path="/bookings" element={<Bookings />} />
-          <Route path="/timer" element={<StudyTimer />} />
-          <Route path="/performance" element={<Performance />} />
-          <Route path="/admin" element={<Admin />} />
-        </Routes>
-      </Suspense>
-    </BrowserRouter>
+    <Suspense fallback={<RouteLoading />}>
+      <Routes>
+        <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/syllabus/:subjectId" element={<Subject />} />
+        <Route
+          path="/syllabus/:subjectId/:chapterId"
+          element={<Chapter />}
+        />
+        <Route path="/goal" element={<Goal />} />
+        <Route path="/settings" element={<Settings />} />
+        <Route path="/catalog" element={<Catalog />} />
+        <Route path="/catalog/new" element={<CatalogNew />} />
+        <Route path="/catalog/:itemId" element={<CatalogItem />} />
+        <Route path="/book/:itemId" element={<Checkout />} />
+        <Route path="/bookings" element={<Bookings />} />
+        <Route path="/timer" element={<StudyTimer />} />
+        <Route path="/performance" element={<Performance />} />
+        <Route path="/admin" element={<Admin />} />
+        <Route path="*" element={<NotFound />} />
+      </Routes>
+    </Suspense>
   );
 }
-
