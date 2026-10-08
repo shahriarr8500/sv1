@@ -17,7 +17,7 @@ import { WelcomeHeader } from "@/components/student-os/WelcomeHeader";
 import { DailyBriefing } from "@/components/student-os/DailyBriefing";
 import { DailyGuidance } from "@/components/student-os/DailyGuidance";
 import { StudentOSTargetsErrorBoundary } from "@/components/student-os/StudentOSTargetsErrorBoundary";
-import { useStudentOS } from "@/state/student-os";
+import { useStudentOS, useSelectedSubjects } from "@/state/student-os";
 import {
   calculateOverallProgress,
   calculateSubjectProgress,
@@ -158,31 +158,30 @@ function LoadingFallback() {
 export default function DashboardPage() {
   const { profile, completions, isStateLoading } = useStudentOS();
   const [paper, setPaper] = React.useState<PaperView>("1st");
-  const subjects = useStudentOS().subjectsForPaper?.(paper) ?? useStudentOS().subjects ?? (useStudentOS() as unknown as { subjects: Subject[] }).subjects;
+  const selectedSubjects = useSelectedSubjects();
   const overall = React.useMemo(
-    () => calculateOverallProgress(subjects, completions),
-    [subjects, completions],
+    () => calculateOverallProgress(selectedSubjects, completions),
+    [selectedSubjects, completions],
   );
 
-  const subjects = useStudentOS().subjectsForPaper?.(paper) ?? useStudentOS().subjects ?? useStudentOS().subjects;
   const subjectSummaries = React.useMemo(
-    () => subjects.map((subject: Subject) => calculateSubjectProgress(subject, completions)),
-    [subjects, completions],
+    () => selectedSubjects.map((subject: Subject) => calculateSubjectProgress(subject, completions)),
+    [selectedSubjects, completions],
   );
   const next = React.useMemo(
-    () => findFirstIncompleteItem(subjects, completions),
-    [subjects, completions],
+    () => findFirstIncompleteItem(selectedSubjects, completions),
+    [selectedSubjects, completions],
   );
   const recent = React.useMemo(
     () => listRecentCompletions(completions, 6),
     [completions],
   );
   const today = React.useMemo(
-    () => subjects.map((subject: Subject) => ({
+    () => selectedSubjects.map((subject: Subject) => ({
       subject,
       summary: calculateSubjectProgress(subject, completions),
     })),
-    [subjects, completions],
+    [selectedSubjects, completions],
   );
 
   const bookings = useBookings();
@@ -202,7 +201,7 @@ export default function DashboardPage() {
         <TodayMissions />
       </StudentOSTargetsErrorBoundary>
 
-      <ContinueStudying next={next} subjects={subjects} />
+      <ContinueStudying next={next} subjects={selectedSubjects} />
 
       <div className="grid gap-4 sm:grid-cols-2">
         <StreakStrip />
@@ -221,13 +220,13 @@ export default function DashboardPage() {
           <PaperSelector value={paper} onChange={setPaper} />
         </div>
 
-        <OverallProgressCard summary={overall} subjects={subjects} />
+        <OverallProgressCard summary={overall} subjects={selectedSubjects} />
 
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {subjectSummaries.map((summary, index) => (
             <SubjectCard
-              key={subjects[index].id}
-              subject={subjects[index]}
+              key={selectedSubjects[index].id}
+              subject={selectedSubjects[index]}
               summary={summary}
               index={index}
             />
