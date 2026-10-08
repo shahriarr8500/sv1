@@ -26,18 +26,16 @@ function readStored(): {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return { surah: 1, expanded: false };
     const parsed = JSON.parse(raw) as {
-      surah?: number;
-      expanded?: boolean;
+      surah?: unknown;
+      expanded?: unknown;
     };
     const surahNumber =
-      Number.isFinite(parsed.surah) &&
-      parsed.surah >= 1 &&
-      parsed.surah <= SURAHS.length
-        ? parsed.surah
+      Number.isFinite(parsed.surah as number) &&
+      (parsed.surah as number) >= 1 &&
+      (parsed.surah as number) <= SURAHS.length
+        ? (parsed.surah as number)
         : 1;
-    return { surah: surahNumber, expanded };
-    const expanded = parsed.expanded === true;
-    return { surah, expanded };
+    return { surah: surahNumber, expanded: parsed.expanded === true };
   } catch {
     return { surah: 1, expanded: false };
   }
@@ -63,7 +61,7 @@ function formatTime(seconds: number): string {
 
 export function FloatingQuranPlayer() {
   const state = useQuranPlayer();
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(state.expanded);
   const [query, setQuery] = useState("");
   const [panelMaxWidth, setPanelMaxWidth] = useState(360);
   const [error, setError] = useState<string | null>(null);
@@ -76,10 +74,10 @@ export function FloatingQuranPlayer() {
       quranPlayer.play(stored.surah);
     }
     // Keep the open/closed decision in sync with what we persist.
-    if (state.expanded !== stored.expanded) {
+    if (expanded !== stored.expanded) {
       setExpanded(stored.expanded);
     }
-  }, [state.surah, state.expanded]);
+  }, []);
 
   // Persist open/closed and the last played surah when either changes.
   useEffect(() => {
@@ -155,16 +153,17 @@ export function FloatingQuranPlayer() {
 
   return (
     <div className="relative z-40">
-      {expanded ? (
+      {state.expanded ? (
         <div
           ref={panel}
-          className="pointer-events-auto left-1/2 z-50 flex w-full flex-col -translate-x-1/2 overflow-auto bg-card shadow-2xl border border-border sm:rounded-xl sm:border"
+          className="pointer-events-auto z-40 flex w-full flex-col overflow-auto bg-card shadow-2xl border border-border sm:rounded-xl sm:border"
           style={{
             width: "100%",
             maxWidth: `${panelMaxWidth}px`,
             maxHeight: "calc(100vh - 104px - env(safe-area-inset-bottom))",
             bottom: "calc(48px + env(safe-area-inset-bottom))",
-            left: "50%",
+            right: "16px",
+            left: "auto",
           }}
         >
           <div className="sticky top-0 z-10 flex w-full items-center justify-between border-b border-border bg-card px-3 py-2 sm:px-4">
@@ -251,7 +250,7 @@ export function FloatingQuranPlayer() {
                 </button>
               </div>
 
-              <div className="flex min-w-0 flex-1 items-center justify-end gap-1.5">
+              <div className="flex items-center justify-between gap-2">
                 <button
                   type="button"
                   aria-label={state.muted ? "Unmute" : "Mute"}
@@ -276,13 +275,13 @@ export function FloatingQuranPlayer() {
                 />
               </div>
             </div>
-
-            {state.error ? (
-              <p className="text-xs text-destructive">{state.error}</p>
-            ) : error ? (
-              <p className="text-xs text-destructive">{error}</p>
-            ) : null}
           </div>
+
+          {state.error ? (
+            <p className="text-xs text-destructive">{state.error}</p>
+          ) : error ? (
+            <p className="text-xs text-destructive">{error}</p>
+          ) : null}
 
           <div className="px-3 pt-3 sm:px-4 sm:pt-4">
             <div className="relative">
@@ -299,9 +298,7 @@ export function FloatingQuranPlayer() {
                 className="h-9 pl-9"
               />
             </div>
-          </div>
-
-          <ul className="max-h-48 overflow-y-auto p-2">
+          </div>            <ul className="max-h-48 overflow-y-auto p-2">
             {results.length === 0 ? (
               <li className="px-2 py-6 text-center text-sm text-muted-foreground">
                 No Surah matches "{query}".
@@ -336,8 +333,9 @@ export function FloatingQuranPlayer() {
         </div>
       ) : null}
 
-      <div
-        className="fixed right-2 inset-x-2 z-40 sm:inset-x-auto sm:right-4 sm:w-auto"
+      <button
+        type="button"
+        className="fixed right-4 z-40"
         style={{ bottom: "calc(16px + env(safe-area-inset-bottom))" }}
         aria-label={expanded ? "Hide Surah list" : "Show Surah list"}
         aria-expanded={expanded}
@@ -345,7 +343,7 @@ export function FloatingQuranPlayer() {
         {/* Marker ring so the tap area is obvious even when no audio is playing. */}
         <div
           className={cn(
-            "pointer-events-auto rounded-full ring-2 ring-offset-2 ring-offset-background transition-opacity",
+            "pointer-events-none rounded-full ring-2 ring-offset-2 ring-offset-background transition-opacity",
             state.playing ? "opacity-100" : "opacity-40",
           )}
         />
@@ -382,7 +380,7 @@ export function FloatingQuranPlayer() {
             )}
           </button>
         </div>
-      </div>
+      </button>
     </div>
   );
 }
