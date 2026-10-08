@@ -206,29 +206,20 @@ export function createDictation(options: {
 /* Voice output (speech synthesis)                                            */
 /* -------------------------------------------------------------------------- */
 
-let currentUtterance: SpeechSynthesisUtterance | null = null;
-
 export function stopSpeaking(): void {
   if (!speechOutputSupported()) return;
   window.speechSynthesis.cancel();
-  currentUtterance = null;
 }
 
 /** Reads a message aloud. Returns false when speech is unavailable. */
 export function speakText(text: string, onDone: () => void): boolean {
   if (!speechOutputSupported()) return false;
+  // Cancelling first makes this a toggle-friendly "replace whatever is playing".
   window.speechSynthesis.cancel();
   const utterance = new SpeechSynthesisUtterance(toSpeechText(text));
   utterance.rate = 1;
-  utterance.onend = () => {
-    currentUtterance = null;
-    onDone();
-  };
-  utterance.onerror = () => {
-    currentUtterance = null;
-    onDone();
-  };
-  currentUtterance = utterance;
+  utterance.onend = onDone;
+  utterance.onerror = onDone;
   window.speechSynthesis.speak(utterance);
   return true;
 }

@@ -164,7 +164,7 @@ export default function AshyPage() {
   const requestIdRef = useRef(0);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const [textareaEl, setTextareaEl] = useState<HTMLTextAreaElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const dictationRef = useRef<ReturnType<typeof createDictation> | null>(null);
   const draftBeforeVoiceRef = useRef("");
 
@@ -284,7 +284,7 @@ export default function AshyPage() {
     );
     setDraft("");
     setPendingImage(null);
-    if (textareaEl) textareaEl.style.height = "auto";
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
 
     const historyForRequest = [...messages, userMessage];
     await requestReply(conversationId, historyForRequest, context);
@@ -296,7 +296,6 @@ export default function AshyPage() {
     messages,
     requestReply,
     context,
-    textareaEl,
   ]);
 
   const stopGenerating = useCallback(() => {
@@ -353,10 +352,9 @@ export default function AshyPage() {
       onFinished: (finished) => {
         setListening(false);
         dictationRef.current = null;
-        setDraft((previous) => {
+        setDraft(() => {
           const base = draftBeforeVoiceRef.current;
-          const merged = base ? `${base} ${finished}`.trimStart() : finished;
-          return merged;
+          return base ? `${base} ${finished}`.trimStart() : finished;
         });
       },
       onStopped: () => {
@@ -385,10 +383,11 @@ export default function AshyPage() {
 
   // Auto-grow the composer (but never let it swallow the screen).
   useEffect(() => {
-    if (!textareaEl) return;
-    textareaEl.style.height = "auto";
-    textareaEl.style.height = `${Math.min(textareaEl.scrollHeight, 160)}px`;
-  }, [draft, textareaEl]);
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    textarea.style.height = "auto";
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 160)}px`;
+  }, [draft]);
 
   // Speech must never outlive the page.
   useEffect(() => {
@@ -516,7 +515,7 @@ export default function AshyPage() {
         {messages.length === 0 ? (
           <WelcomeScreen onPick={(prompt) => {
             setDraft(prompt);
-            textareaEl?.focus();
+            textareaRef.current?.focus();
           }} />
         ) : (
           <ul className="space-y-5">
@@ -737,7 +736,7 @@ export default function AshyPage() {
         ) : null}
 
         <Textarea
-          ref={setTextareaEl}
+          ref={textareaRef}
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {

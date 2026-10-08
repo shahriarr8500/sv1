@@ -7,8 +7,8 @@
 
 import type { Target } from "./target-model";
 import type { Subject, Chapter } from "./types";
-import { TARGETS_KEY, targetStore } from "./target-store";
-import { SYLLABUS, getSubject, getChapter, lookupItem } from "./syllabus";
+import { targetStore } from "./target-store";
+import { SYLLABUS, lookupItem } from "./syllabus";
 import { todayKey, weekStartKey, weekEndKey } from "./target-calendar";
 import { BASE_MISSION_XP } from "./gamification";
 

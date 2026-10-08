@@ -175,38 +175,6 @@ export default function OnboardingPage() {
     </div>
   );
 
-  const choiceStep = ({
-    question,
-    hint,
-    options,
-    value,
-    onChange,
-    customPlaceholder,
-  }: {
-    question: string;
-    hint: string;
-    options: string[];
-    value: string;
-    onChange: (value: string) => void;
-    customPlaceholder: string;
-  }): ReactNode => (
-    <div className="space-y-6">
-      <div className="space-y-2">
-        <h2 className="text-2xl font-bold tracking-tight sm:text-3xl">
-          {question}
-        </h2>
-        <p className="text-sm text-muted-foreground">{hint}</p>
-      </div>
-      <ChoiceSelect
-        options={options}
-        initialValue={value}
-        onChange={onChange}
-        customPlaceholder={customPlaceholder}
-        ariaLabel={question}
-      />
-    </div>
-  );
-
   const summaryRow = (label: string, value: string) => (
     <div className="flex items-start justify-between gap-4 px-5 py-4">
       <dt className="text-sm font-medium text-muted-foreground">{label}</dt>

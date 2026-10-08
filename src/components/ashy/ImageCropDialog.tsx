@@ -13,7 +13,6 @@
 
 import {
   useCallback,
-  useEffect,
   useRef,
   useState,
   type CSSProperties,
@@ -93,10 +92,16 @@ export function ImageCropDialog({
   const [selection, setSelection] = useState<Rect>(FULL_RECT);
   const [dragging, setDragging] = useState(false);
 
-  // Each time a new image opens, the whole image starts selected.
-  useEffect(() => {
-    if (open) setSelection(FULL_RECT);
-  }, [open, src]);
+  // Adjusting state during render (React's documented alternative to doing it
+  // in an effect): each time the dialog opens for a new image, the whole
+  // image starts selected.
+  const imageKey = open ? (src ?? "") : null;
+  const [lastImageKey, setLastImageKey] = useState<string | null>(imageKey);
+  if (imageKey !== lastImageKey) {
+    setLastImageKey(imageKey);
+    setSelection(FULL_RECT);
+    setDragging(false);
+  }
 
   const pointFromEvent = useCallback((event: ReactPointerEvent) => {
     const frame = frameRef.current;

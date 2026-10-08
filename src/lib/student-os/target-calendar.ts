@@ -6,7 +6,7 @@
  * "date-fns converts to UTC" surprises.
  */
 
-import { parseISO, isWithinInterval, startOfDay, endOfDay, startOfWeek } from "date-fns";
+import { parseISO, isWithinInterval, startOfDay, endOfDay } from "date-fns";
 
 export { isWithinInterval };
 

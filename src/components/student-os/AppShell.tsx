@@ -358,8 +358,9 @@ export function AppShell() {
     if (mountedRef.current) return;
     mountedRef.current = true;
     try {
-      document.documentElement.dir ?? (document.documentElement.dir = "ltr");
+      if (!document.documentElement.dir) document.documentElement.dir = "ltr";
     } catch {
+      // Defensive: the document is always available in the browser.
     }
     setSafeAreaPadding();
   }, []);
@@ -460,5 +461,6 @@ function setSafeAreaPadding() {
       el.style.setProperty("--quran-page-bottom", "0px");
     }
   } catch {
+    // Safe-area probing is best-effort — never block the shell on it.
   }
 }

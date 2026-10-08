@@ -88,11 +88,16 @@ function Carousel({
 
   React.useEffect(() => {
     if (!api || !setApi) return
+    // Publishing embla's api instance to the parent: subscription work for an
+    // external system, with no other trigger point embla provides.
     setApi(api)
   }, [api, setApi])
 
   React.useEffect(() => {
     if (!api) return
+    // Seed the scroll-button state from the external embla instance as soon
+    // as it is ready — this mirrors any later "select" event.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     onSelect(api)
     api.on("reInit", onSelect)
     api.on("select", onSelect)

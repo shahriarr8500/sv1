@@ -8,7 +8,6 @@ import { WorkspaceProvider } from "@/state/workspace";
 import { StudyLogProvider } from "@/state/study-log";
 import { TargetsProvider } from "@/state/targets";
 import { GamificationProvider } from "@/state/gamification";
-import { TimerWidget } from "@/components/student-os/TimerWidget";
 import { VlyToolbar } from "../vly-toolbar-readonly.tsx";
 import { ConvexAuthProvider } from "@convex-dev/auth/react";
 import { ThemeProvider } from "next-themes";
