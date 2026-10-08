@@ -1,1 +1,0 @@
-import{u as s}from"./use-impersonation-DbcAAw7U.js";import{u}from"./index-C0OlIJTi.js";function a(){const{user:t}=u(),{isImpersonating:n,target:e}=s();return n&&e?e.name??e.email??"Impersonated account":t?.email??t?.name??"Guest student"}export{a as u};
