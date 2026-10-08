@@ -1,12 +1,3 @@
-/**
- * Quran player store — a single module-level `<audio>` element plus a
- * subscription store, so the mini-player survives navigation instead of
- * being torn down by a route change.
- *
- * Nothing here touches XP, streaks or achievements. Audio never autoplays:
- * `play()` is only ever reached from an explicit user press.
- */
-
 import { useSyncExternalStore } from "react";
 import { SURAHS, surahAudioUrl, surahName } from "@/lib/student-os/quran";
 
@@ -14,12 +5,10 @@ export interface QuranPlayerState {
   surah: number;
   playing: boolean;
   loading: boolean;
-  /** Seconds — mirrored from the element on `timeupdate`. */
   currentTime: number;
   duration: number;
   volume: number;
   muted: boolean;
-  /** Expanded panel vs the collapsed persistent mini-player. */
   expanded: boolean;
   error: string | null;
 }
@@ -29,7 +18,6 @@ const VOLUME_KEY = "student-os:quran-volume";
 function readVolume(): number {
   try {
     const stored = localStorage.getItem(VOLUME_KEY);
-    // `Number(null)` is 0, which would silently start every surah muted.
     if (stored === null || stored.trim() === "") return 0.8;
     const parsed = Number(stored);
     return Number.isFinite(parsed) && parsed > 0 && parsed <= 1 ? parsed : 0.8;
@@ -61,11 +49,12 @@ function emit(patch: Partial<QuranPlayerState>): void {
 function ensureAudio(): HTMLAudioElement | null {
   if (typeof window === "undefined") return null;
   if (audio) return audio;
+
   const element = new Audio();
   element.preload = "metadata";
   element.volume = snapshot.volume;
 
-  element.addEventListener("loadstart", () => emit({ loading: true, error: null }));
+  element.addEventListener("loadstart", () => emit({ loading: true }));
   element.addEventListener("loadedmetadata", () =>
     emit({ loading: false, duration: element.duration || 0 }),
   );
@@ -76,14 +65,17 @@ function ensureAudio(): HTMLAudioElement | null {
   element.addEventListener("play", () => emit({ playing: true }));
   element.addEventListener("pause", () => emit({ playing: false }));
   element.addEventListener("ended", () => {
-    // Stop at the end rather than auto-advancing: no surprise audio.
     emit({ playing: false, currentTime: 0 });
+  });
+  element.addEventListener("abort", () => {
+    emit({ loading: false });
   });
   element.addEventListener("error", () => {
     emit({
       playing: false,
       loading: false,
-      error: "Audio could not be loaded. Check your connection and try again.",
+      error:
+        "Audio could not be loaded. Check your connection and try again.",
     });
   });
 
@@ -107,10 +99,10 @@ export function useQuranPlayer(): QuranPlayerState {
 }
 
 export const quranPlayer = {
-  /** Loads a surah and starts it. Only ever called from a user gesture. */
   play(surah: number): void {
     const element = ensureAudio();
     if (!element) return;
+
     const clamped = Math.min(Math.max(1, surah), SURAHS.length);
     if (snapshot.surah !== clamped) {
       element.src = surahAudioUrl(clamped);
@@ -119,9 +111,14 @@ export const quranPlayer = {
     } else if (!element.src) {
       element.src = surahAudioUrl(clamped);
     }
+
     emit({ loading: true, error: null });
     void element.play().catch(() => {
-      emit({ playing: false, loading: false, error: "Playback was blocked." });
+      emit({
+        playing: false,
+        loading: false,
+        error: "Playback was blocked.",
+      });
     });
   },
 
@@ -131,7 +128,9 @@ export const quranPlayer = {
 
   resume(): void {
     if (!audio) return quranPlayer.play(snapshot.surah);
-    void audio.play().catch(() => emit({ playing: false, error: "Playback was blocked." }));
+    void audio.play().catch(() =>
+      emit({ playing: false, error: "Playback was blocked." }),
+    );
   },
 
   toggle(): void {
@@ -142,8 +141,10 @@ export const quranPlayer = {
   stop(): void {
     if (!audio) return;
     audio.pause();
-    audio.currentTime = 0;
-    emit({ playing: false, currentTime: 0, loading: false });
+    if (snapshot.playing || snapshot.currentTime > 0) {
+      audio.currentTime = 0;
+      emit({ playing: false, currentTime: 0, loading: false });
+    }
   },
 
   next(): void {
@@ -157,13 +158,17 @@ export const quranPlayer = {
   seek(seconds: number): void {
     if (!audio || !Number.isFinite(seconds)) return;
     const bounded = Math.min(Math.max(0, seconds), snapshot.duration || 0);
-    audio.currentTime = bounded;
-    emit({ currentTime: bounded });
+    if (Math.abs(audio.currentTime - bounded) > 0.05) {
+      audio.currentTime = bounded;
+      emit({ currentTime: bounded });
+    }
   },
 
   setVolume(value: number): void {
     const bounded = Math.min(Math.max(0, value), 1);
-    if (audio) audio.volume = bounded;
+    if (audio && audio.volume !== bounded) {
+      audio.volume = bounded;
+    }
     try {
       localStorage.setItem(VOLUME_KEY, String(bounded));
     } catch {
@@ -174,7 +179,9 @@ export const quranPlayer = {
 
   toggleMute(): void {
     const muted = !snapshot.muted;
-    if (audio) audio.muted = muted;
+    if (audio && audio.muted !== muted) {
+      audio.muted = muted;
+    }
     emit({ muted });
   },
 
@@ -187,7 +194,6 @@ export const quranPlayer = {
   },
 };
 
-/** "1.4 Physical quantities" style label for the player header. */
 export function currentSurahLabel(surah: number): string {
   return `${surahName(surah)}`;
 }
