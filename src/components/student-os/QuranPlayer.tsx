@@ -9,7 +9,7 @@
  * Outside the game: no XP, no streak, no achievements.
  */
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState, useEffect } from "react";
 import {
   ChevronUp,
   Headphones,
@@ -38,6 +38,7 @@ export function QuranPlayer() {
   const state = useQuranPlayer();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const panel = useRef<HTMLDivElement | null>(null);
 
   const results = useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -52,11 +53,10 @@ export function QuranPlayer() {
   const current = SURAHS[state.surah - 1] ?? SURAHS[0];
 
   return (
-    <div className="fixed right-4 bottom-4 z-50 flex flex-col items-end gap-2">
+    <div className="fixed right-4 mobile:(top-auto bottom-auto inset-x-4 bottom-28 z-50)">
       {/* On-demand Surah list — never shown unless asked for. */}
-      {open ? (
-        <div className="w-[min(22rem,calc(100vw-2rem))] overflow-hidden rounded-xl border bg-card shadow-2xl">
-          <div className="flex items-center justify-between border-b px-3 py-2">
+      {open ? (          <div ref={panel} className="mobile:(left-0 right-0 top-0 z-50 flex w-full flex-col bg-card overflow-auto shadow-2xl lg:w-[min(22rem,calc(100vw-2rem))])">
+          <div className="relative border-b bg-background px-3 py-2 sm:px-4">
             <p className="flex items-center gap-1.5 text-xs font-semibold tracking-wider text-muted-foreground uppercase">
               <Headphones className="size-3.5 text-primary" aria-hidden />
               Quran Player
@@ -72,8 +72,8 @@ export function QuranPlayer() {
           </div>
 
           {/* Transport */}
-          <div className="space-y-2 border-b px-3 py-3">
-            <div className="flex items-center gap-2">
+          <div className="space-y-2 border-b px-3 py-3 sm:px-4">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="min-w-0 flex-1 truncate text-sm font-medium">
                 {current.name}
               </span>
@@ -99,7 +99,7 @@ export function QuranPlayer() {
               }}
             />
 
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-1">
                 <button
                   type="button"
@@ -171,7 +171,7 @@ export function QuranPlayer() {
           </div>
 
           {/* Search + list */}
-          <div className="px-3 pt-3">
+          <div className="px-3 pt-3 sm:px-4 sm:pt-4">
             <div className="relative">
               <Search
                 className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
@@ -223,35 +223,57 @@ export function QuranPlayer() {
       ) : null}
 
       {/* The button itself */}
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          aria-label={open ? "Hide Surah list" : "Show Surah list"}
-          aria-expanded={open}
-          className={cn(
-            "grid size-10 cursor-pointer place-items-center rounded-full border bg-card text-muted-foreground shadow-lg transition-colors hover:text-foreground",
-            open && "text-foreground",
-          )}
-          onClick={() => setOpen((value) => !value)}
-        >
-          <ListMusic className="size-4" aria-hidden />
-        </button>
+      <div className="fixed mobile:(right-4 top-auto bottom-28 left-auto z-50)">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            aria-label={open ? "Hide Surah list" : "Show Surah list"}
+            aria-expanded={open}
+            className={cn(
+              "grid size-10 cursor-pointer place-items-center rounded-full border bg-card text-muted-foreground shadow-lg transition-colors hover:text-foreground",
+              open && "text-foreground",
+            )}
+            onClick={() => {
+              const next = !open;
+              setOpen(next);
+              if (next) {
+                requestAnimationFrame(() => {
+                  if (panel.current && typeof window !== "undefined") {
+                requestAnimationFrame(() => {
+                  if (panel.current) {
+                    if (window.scrollY === 0) {
+                      panel.current.scrollTop = 0;
+                    } else {
+                      panel.current.scrollTop = panel.current.scrollHeight;
+                    }
+                  }
+                });
+              }
+                });
+              }
 
-        <button
-          type="button"
-          aria-label={state.playing ? "Pause Quran" : "Play Quran"}
-          onClick={() => quranPlayer.toggle()}
-          className={cn(
-            "grid size-12 cursor-pointer place-items-center rounded-full text-primary-foreground shadow-xl transition-transform active:scale-95",
-            state.playing ? "bg-primary" : "bg-primary",
-          )}
-        >
-          {state.playing ? (
-            <Pause className="size-5" aria-hidden />
-          ) : (
-            <Headphones className="size-5" aria-hidden />
-          )}
-        </button>
+              });
+            }}
+          >
+            <ListMusic className="size-4" aria-hidden />
+          </button>
+
+          <button
+            type="button"
+            aria-label={state.playing ? "Pause Quran" : "Play Quran"}
+            onClick={() => quranPlayer.toggle()}
+            className={cn(
+              "grid size-12 shrink-0 cursor-pointer place-items-center rounded-full text-primary-foreground shadow-xl transition-transform active:scale-95",
+              state.playing ? "bg-primary" : "bg-primary",
+            )}
+          >
+            {state.playing ? (
+              <Pause className="size-5" aria-hidden />
+            ) : (
+              <Headphones className="size-5" aria-hidden />
+            )}
+          </button>
+        </div>
       </div>
     </div>
   );
