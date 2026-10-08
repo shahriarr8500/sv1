@@ -8,7 +8,7 @@
 import { Button } from "@/components/ui/button";
 import { StudentOsLogo } from "@/components/student-os/StudentOsLogo";
 import { CompletionCelebration } from "@/components/student-os/CompletionCelebration";
-import { QuranPlayer } from "@/components/student-os/QuranPlayer";
+import { FloatingQuranPlayer } from "@/components/student-os/FloatingQuranPlayer";
 import {
   Sheet,
   SheetContent,
@@ -44,7 +44,7 @@ import {
   UserCog,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, NavLink, Navigate, Outlet, useLocation } from "react-router";
 
 interface NavEntry {
@@ -285,6 +285,7 @@ export function AppShell() {
   // Both papers, so the sidebar can show 1st/2nd progress per subject.
   const paperSubjects = useSubjectsForPaper("all");
   const location = useLocation();
+  const mountedRef = useRef(false);
   const [navOpen, setNavOpen] = useState(false);
 
   // Keep the viewport at the top for route changes (hash targets scroll themselves).
@@ -292,6 +293,18 @@ export function AppShell() {
     if (!location.hash) window.scrollTo({ top: 0 });
   }, [location.pathname, location.hash]);
 
+  // Text direction for the floating player, set once on mount so SSR/initial
+  // render matches the first client paint.
+  useEffect(() => {
+    if (mountedRef.current) return;
+    mountedRef.current = true;
+    try {
+      document.documentElement.dir ?? (document.documentElement.dir = "ltr");
+    } catch {
+      /* not fatal */
+    }
+    setSafeAreaPadding();
+  }, []);
   const progressBySubject = useMemo(() => {
     const map = new Map<string, number>();
     for (const subject of paperSubjects) {
@@ -361,8 +374,7 @@ export function AppShell() {
           </div>
           <SidebarNav
             subjects={subjects}
-            progressBySubject={progressBySubject}
-            onNavigate={() => setNavOpen(false)}
+            progressBySubject={progressBySubject}          onNavigate={() => setNavOpen(false)}
           />
           <div className="border-t p-3">
             <AccountRow />
@@ -377,9 +389,30 @@ export function AppShell() {
         </main>
       </div>
 
-      {/* Mounted once so both survive every route change. */}
+      {/* Persistent, route-surviving widgets. */}
+      <FloatingQuranPlayer />
       <CompletionCelebration />
-      <QuranPlayer />
     </div>
   );
 }
+
+
+function setSafeAreaPadding() {
+  try {
+    if (typeof window === "undefined" || !document.documentElement) return;
+    const el = document.documentElement;
+    const safe = Number.parseFloat(
+      getComputedStyle(el).getPropertyValue("--quran-safe-bottom").trim(),
+    );
+    if (Number.isFinite(safe) && safe > 0) {
+      el.style.paddingBottom = `${safe}px`;
+      el.style.setProperty("--quran-page-bottom", `${safe}px`);
+    } else {
+      el.style.paddingBottom = "";
+      el.style.setProperty("--quran-page-bottom", "0px");
+    }
+  } catch {
+    /* not fatal */
+  }
+}
+

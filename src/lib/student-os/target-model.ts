@@ -22,6 +22,8 @@ export interface Target {
    * never edited afterwards, so the reward stays predictable.
    */
   readonly xp: number;
+  /** Optional tag shown beside the mission (e.g. "BUET · 1st Position"). */
+  readonly tag?: string;
 }
 
 export function makeTargetId(): string {

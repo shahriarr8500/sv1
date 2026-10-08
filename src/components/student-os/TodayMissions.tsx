@@ -276,6 +276,7 @@ export function TodayMissions() {
                             Already in syllabus
                           </span>
                         ) : null}
+
                       </div>
                     </div>
 

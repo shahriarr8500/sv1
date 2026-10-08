@@ -2,7 +2,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ContinueStudying } from "@/components/student-os/ContinueStudying";
 import { DailyBriefing } from "@/components/student-os/DailyBriefing";
-import { DailyGuidance } from "@/components/student-os/DailyGuidance";
 import { LevelCard } from "@/components/student-os/LevelCard";
 import { OverallProgressCard } from "@/components/student-os/OverallProgressCard";
 import { RecentProgress } from "@/components/student-os/RecentProgress";
@@ -74,11 +73,11 @@ function PaperSelector({
 
 /**
  * Dashboard — the Student OS home screen, ordered around the daily loop:
- *   greet → daily guidance → today's missions → what's next → summary
+ *   greet → today's missions → today headline → next action → summary
  *
- * Deliberately not a wall of cards: one greeting, one quiet reading card,
- * one mission list, one next action, then progress. Everything else lives
- * behind the syllabus and performance routes.
+ * Deliberately not a wall of cards: one greeting, one mission list, one
+ * next action, then progress. Everything else lives behind the syllabus and
+ * performance routes.
  */
 export default function DashboardPage() {
   const { profile, completions } = useStudentOS();
@@ -115,27 +114,21 @@ export default function DashboardPage() {
       {/* 1. Who you are + what to do right now */}
       <WelcomeHeader />
 
-      {/* 2. Quiet briefing — guidance and a two-line summary of real progress */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        <DailyGuidance />
-        <DailyBriefing />
-      </div>
-
-      {/* 3. Today's missions — the heart of the loop */}
+      {/* 2. Today's missions — the heart of the loop */}
       <StudentOSTargetsErrorBoundary>
         <TodayMissions />
       </StudentOSTargetsErrorBoundary>
 
-      {/* 4. Next action — one card, full width, nothing competing with it */}
+      {/* 3. Next action — one card, full width, nothing competing with it */}
       <ContinueStudying next={next} subjects={subjects} />
 
-      {/* 5. Consistency + level — two equal cards, no nested column wrappers */}
+      {/* 4. Consistency + level — two equal cards, no nested column wrappers */}
       <div className="grid gap-4 sm:grid-cols-2">
         <StreakStrip />
         <LevelCard />
       </div>
 
-      {/* 6. Syllabus progress — the organised, Notion-like layer */}
+      {/* 5. Syllabus progress — the organised, Notion-like layer */}
       <section aria-labelledby="syllabus-progress-heading" className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2
@@ -218,3 +211,4 @@ export default function DashboardPage() {
     </div>
   );
 }
+

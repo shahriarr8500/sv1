@@ -43,6 +43,7 @@ function normalizeTarget(raw: unknown): Target | null {
     targetDate: typeof t.targetDate === "string" ? t.targetDate : undefined,
     weekStart: typeof t.weekStart === "string" ? t.weekStart : undefined,
     xp,
+    tag: typeof t.tag === "string" && t.tag.trim().length > 0 ? t.tag.trim() : undefined,
   };
 }
 

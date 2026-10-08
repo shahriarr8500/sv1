@@ -19,28 +19,28 @@ import { BrowserRouter, Route, Routes, useLocation } from "react-router";
 import "./index.css";
 
 // Lazy load route components for better code splitting
-const Landing = lazy(() => import("./pages/Landing.tsx"));
-const AuthPage = lazy(() => import("./pages/Auth.tsx"));
-const AccessPass = lazy(() => import("./pages/AccessPass.tsx"));
-const AdminEntry = lazy(() => import("./pages/AdminEntry.tsx"));
-const AdminConsole = lazy(() => import("./pages/AdminConsole.tsx"));
-const Onboarding = lazy(() => import("./pages/Onboarding.tsx"));
-const Dashboard = lazy(() => import("./pages/Dashboard.tsx"));
-const Subject = lazy(() => import("./pages/Subject.tsx"));
-const Chapter = lazy(() => import("./pages/Chapter.tsx"));
-const Goal = lazy(() => import("./pages/Goal.tsx"));
-const Settings = lazy(() => import("./pages/Settings.tsx"));
-const Catalog = lazy(() => import("./pages/Catalog.tsx"));
-const CatalogNew = lazy(() => import("./pages/CatalogNew.tsx"));
-const CatalogItem = lazy(() => import("./pages/CatalogItem.tsx"));
-const Checkout = lazy(() => import("./pages/Checkout.tsx"));
-const Bookings = lazy(() => import("./pages/Bookings.tsx"));
-const Admin = lazy(() => import("./pages/Admin.tsx"));
-const StudyTimer = lazy(() => import("./pages/StudyTimer.tsx"));
-const Performance = lazy(() => import("./pages/Performance.tsx"));
+const Landing = lazy(() => import("./pages/Landing"));
+const AuthPage = lazy(() => import("./pages/Auth"));
+const AccessPass = lazy(() => import("./pages/AccessPass"));
+const AdminEntry = lazy(() => import("./pages/AdminEntry"));
+const AdminConsole = lazy(() => import("./pages/AdminConsole"));
+const Onboarding = lazy(() => import("./pages/Onboarding"));
+const Dashboard = lazy(() => import("./pages/Dashboard"));
+const Subject = lazy(() => import("./pages/Subject"));
+const Chapter = lazy(() => import("./pages/Chapter"));
+const Goal = lazy(() => import("./pages/Goal"));
+const Settings = lazy(() => import("./pages/Settings"));
+const Catalog = lazy(() => import("./pages/Catalog"));
+const CatalogNew = lazy(() => import("./pages/CatalogNew"));
+const CatalogItem = lazy(() => import("./pages/CatalogItem"));
+const Checkout = lazy(() => import("./pages/Checkout"));
+const Bookings = lazy(() => import("./pages/Bookings"));
+const Admin = lazy(() => import("./pages/Admin"));
+const StudyTimer = lazy(() => import("./pages/StudyTimer"));
+const Performance = lazy(() => import("./pages/Performance"));
 // Unlinked sandbox for trying new UI without touching the app.
-const Labs = lazy(() => import("./labs/Labs.tsx"));
-const NotFound = lazy(() => import("./pages/NotFound.tsx"));
+const Labs = lazy(() => import("./labs/Labs"));
+const NotFound = lazy(() => import("./pages/NotFound"));
 
 // Simple loading fallback for route transitions
 function RouteLoading() {
@@ -223,28 +223,11 @@ createRoot(document.getElementById("root")!).render(
                                 description="Your dashboard, syllabus, and progress live behind sign-in."
                               >
                                 <RequireAccessPass>
-                                  <AppShell />
+                                  <StudentOSApp />
                                 </RequireAccessPass>
                               </RequireAuth>
                             }
-                          >
-                            <Route path="/dashboard" element={<Dashboard />} />
-                            <Route path="/syllabus/:subjectId" element={<Subject />} />
-                            <Route
-                              path="/syllabus/:subjectId/:chapterId"
-                              element={<Chapter />}
-                            />
-                            <Route path="/goal" element={<Goal />} />
-                            <Route path="/settings" element={<Settings />} />
-                            <Route path="/catalog" element={<Catalog />} />
-                            <Route path="/catalog/new" element={<CatalogNew />} />
-                            <Route path="/catalog/:itemId" element={<CatalogItem />} />
-                            <Route path="/book/:itemId" element={<Checkout />} />
-                            <Route path="/bookings" element={<Bookings />} />
-                            <Route path="/timer" element={<StudyTimer />} />
-                            <Route path="/performance" element={<Performance />} />
-                            <Route path="/admin" element={<Admin />} />
-                          </Route>
+                          />
                           {/* Sandbox: not linked from any nav, public so an experiment can
                               be previewed without signing in. */}
                           <Route path="/labs" element={<Labs />} />
@@ -253,7 +236,6 @@ createRoot(document.getElementById("root")!).render(
                         </Routes>
                       </Suspense>
                     </BrowserRouter>
-                    <TimerWidget />
                     <Toaster />
                   </GamificationProvider>
                 </TargetsProvider>
@@ -265,3 +247,35 @@ createRoot(document.getElementById("root")!).render(
     </RootErrorBoundary>
   </StrictMode>,
 );
+
+/** Single mounted shell for every signed-in Student OS route. The Quran player,
+ *  timer widget and toaster live outside the router `<Outlet />` so route
+ *  changes never unmount them. */
+export function StudentOSApp() {
+  return (
+    <BrowserRouter>
+      <RouteSyncer />
+      <Suspense fallback={<RouteLoading />}>
+        <Routes>
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/syllabus/:subjectId" element={<Subject />} />
+          <Route
+            path="/syllabus/:subjectId/:chapterId"
+            element={<Chapter />}
+          />
+          <Route path="/goal" element={<Goal />} />
+          <Route path="/settings" element={<Settings />} />
+          <Route path="/catalog" element={<Catalog />} />
+          <Route path="/catalog/new" element={<CatalogNew />} />
+          <Route path="/catalog/:itemId" element={<CatalogItem />} />
+          <Route path="/book/:itemId" element={<Checkout />} />
+          <Route path="/bookings" element={<Bookings />} />
+          <Route path="/timer" element={<StudyTimer />} />
+          <Route path="/performance" element={<Performance />} />
+          <Route path="/admin" element={<Admin />} />
+        </Routes>
+      </Suspense>
+    </BrowserRouter>
+  );
+}
+

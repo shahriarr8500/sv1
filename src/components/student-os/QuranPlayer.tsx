@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronUp,
   Headphones,
@@ -45,6 +45,12 @@ export function QuranPlayer() {
     }
   }, []);
 
+  useEffect(() => {
+    if (!open) return;
+    const timer = setTimeout(openPanel, 60);
+    return () => clearTimeout(timer);
+  }, [open, openPanel]);
+
   const results = useMemo(() => {
     const term = query.trim().toLowerCase();
     if (!term) return SURAHS.slice(0, 50);
@@ -57,21 +63,37 @@ export function QuranPlayer() {
 
   const current = SURAHS[state.surah - 1] ?? SURAHS[0];
 
+  const panelMaxWidth = useMemo(
+    () =>
+      Math.min(
+        360,
+        Math.max(320, window.innerWidth - 32),
+      ),
+    [],
+  );
+
   return (
-    <div className="fixed inset-0 z-50 pointer-events-none">
+    <div className="relative z-50 pointer-events-none">
       {open ? (
         <div
           ref={panel}
-          className="pointer-events-auto left-4 right-4 z-50 flex w-full flex-col overflow-auto bg-card shadow-2xl lg:left-auto lg:right-4 lg:w-[min(22rem,calc(100vw-2rem))] dark:bg-[#0d2612] sm:rounded-xl mobile:max-h-[55vh]"
+          className="pointer-events-auto left-1/2 z-50 flex w-full flex-col -translate-x-1/2 overflow-auto bg-card shadow-2xl sm:rounded-xl"
+          style={{
+            maxWidth: `${panelMaxWidth}px`,
+            width: "100%",
+            maxHeight: "calc(100vh - 88px - env(safe-area-inset-bottom))",
+            bottom: "calc(72px + env(safe-area-inset-bottom))",
+            left: "50%",
+          }}
         >
-          <div className="relative border-b bg-background px-3 py-2 sm:px-4">
+          <div className="sticky top-0 z-10 flex w-full items-center justify-between border-b bg-card px-3 py-2 sm:px-4">
             <p className="flex items-center gap-1.5 text-xs font-semibold tracking-wider text-muted-foreground uppercase">
               <Headphones className="size-3.5 text-primary" aria-hidden />
               Quran Player
             </p>
             <button
               type="button"
-              aria-label="Close player"
+              aria-label="Minimize player"
               className="cursor-pointer rounded-md p-1 text-muted-foreground transition-colors hover:text-foreground"
               onClick={() => setOpen(false)}
             >
@@ -196,7 +218,7 @@ export function QuranPlayer() {
             </div>
           </div>
 
-          <ul className="max-h-52 overflow-y-auto p-2">
+          <ul className="max-h-48 overflow-y-auto p-2">
             {results.length === 0 ? (
               <li className="px-2 py-6 text-center text-sm text-muted-foreground">
                 No Surah matches "{query}".
@@ -231,11 +253,8 @@ export function QuranPlayer() {
         </div>
       ) : null}
 
-      <div className="fixed right-4 z-50">
-        <div
-          className="flex h-12 items-center"
-          style={{ bottom: "calc(16px + env(safe-area-inset-bottom))" }}
-        >
+      <div className="fixed right-2 top-auto z-50" style={{ bottom: "calc(16px + env(safe-area-inset-bottom))" }}>
+        <div className="flex items-center gap-2">
           <button
             type="button"
             aria-label={open ? "Hide Surah list" : "Show Surah list"}
