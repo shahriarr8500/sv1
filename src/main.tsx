@@ -254,23 +254,25 @@ export function StudentOSApp() {
   return (
     <Suspense fallback={<RouteLoading />}>
       <Routes>
-        <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/syllabus/:subjectId" element={<Subject />} />
-        <Route
-          path="/syllabus/:subjectId/:chapterId"
-          element={<Chapter />}
-        />
-        <Route path="/goal" element={<Goal />} />
-        <Route path="/settings" element={<Settings />} />
-        <Route path="/catalog" element={<Catalog />} />
-        <Route path="/catalog/new" element={<CatalogNew />} />
-        <Route path="/catalog/:itemId" element={<CatalogItem />} />
-        <Route path="/book/:itemId" element={<Checkout />} />
-        <Route path="/bookings" element={<Bookings />} />
-        <Route path="/timer" element={<StudyTimer />} />
-        <Route path="/performance" element={<Performance />} />
-        <Route path="/admin" element={<Admin />} />
-        <Route path="*" element={<NotFound />} />
+        <Route element={<AppShell />}>
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/syllabus/:subjectId" element={<Subject />} />
+          <Route
+            path="/syllabus/:subjectId/:chapterId"
+            element={<Chapter />}
+          />
+          <Route path="/goal" element={<Goal />} />
+          <Route path="/settings" element={<Settings />} />
+          <Route path="/catalog" element={<Catalog />} />
+          <Route path="/catalog/new" element={<CatalogNew />} />
+          <Route path="/catalog/:itemId" element={<CatalogItem />} />
+          <Route path="/book/:itemId" element={<Checkout />} />
+          <Route path="/bookings" element={<Bookings />} />
+          <Route path="/timer" element={<StudyTimer />} />
+          <Route path="/performance" element={<Performance />} />
+          <Route path="/admin" element={<Admin />} />
+          <Route path="*" element={<NotFound />} />
+        </Route>
       </Routes>
     </Suspense>
   );
