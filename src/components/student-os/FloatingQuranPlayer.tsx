@@ -1,20 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  ChevronUp,
-  Headphones,
-  ListMusic,
-  Pause,
-  Play,
-  Search,
-  Square,
-  Volume2,
-  VolumeX,
-} from "lucide-react";
+import { useState, useCallback, useRef, useEffect } from "react";
+import { Headphones, ListMusic, Play, Pause, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { Slider } from "@/components/ui/slider";
+import { Button } from "@/components/ui/button";
 import { SURAHS, surahAudioUrl, surahName } from "@/lib/student-os/quran";
 import { cn } from "@/lib/utils";
-import { quranPlayer, useQuranPlayer } from "@/state/quran-player";
 
 const STORAGE_KEY = "student-os:quran-player:v1";
 
@@ -50,117 +39,192 @@ function writeStored(surah: number, expanded: boolean): void {
   }
 }
 
-function formatTime(seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
-  const minutes = Math.floor(seconds / 60);
-  const rest = Math.floor(seconds % 60);
-  return `${minutes}:${String(rest).padStart(2, "0")}`;
-}
-
 export function FloatingQuranPlayer() {
-  const state = useQuranPlayer();
-  const [expanded, setExpanded] = useState(state.expanded);
+  const stored = readStored();
+  const [surah, setSurah] = useState(stored.surah);
+  const [expanded, setExpanded] = useState(stored.expanded);
   const [query, setQuery] = useState("");
-  const [panelMaxWidth, setPanelMaxWidth] = useState(360);
   const [error, setError] = useState<string | null>(null);
-  const panel = useRef<HTMLDivElement | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const dialogRef = useRef<HTMLDivElement | null>(null);
 
-  // Restore the last opened surah once the state has settled.
-  useEffect(() => {
-    const stored = readStored();
-    if (state.surah !== stored.surah) {
-      quranPlayer.play(stored.surah);
-    }
-    // Keep the open/closed decision in sync with what we persist.
-    if (expanded !== stored.expanded) {
-      setExpanded(stored.expanded);
-    }
-  }, []);
+  const current = SURAHS[surah - 1] ?? SURAHS[0];
+  const results = SURAHS.filter(
+    (item) =>
+      item.name.toLowerCase().includes(query.toLowerCase()) ||
+      String(item.number) === query,
+  );
 
-  // Persist open/closed and the last played surah when either changes.
-  useEffect(() => {
-    writeStored(state.surah, expanded);
-  }, [state.surah, expanded]);
-
-  // Keep the panel width clamped as the window resizes.
-  useEffect(() => {
-    const update = () => {
-      const next = Math.min(360, Math.max(320, window.innerWidth - 32));
-      setPanelMaxWidth(next);
-    };
-    update();
-    window.addEventListener("resize", update);
-    return () => window.removeEventListener("resize", update);
-  }, []);
-
-  const openPanel = useCallback(() => {
-    if (!panel.current) return;
-    try {
-      const current = panel.current.querySelector("[data-quran-surah]");
-      if (current) {
-        const top = current.getBoundingClientRect().top;
-        panel.current.scrollTo({
-          top: panel.current.scrollTop + top,
-          behavior: "smooth",
-        });
+  const setAudioSrc = useCallback(
+    (nextUrl: string) => {
+      const audio = audioRef.current;
+      if (!audio) return;
+      if (audio.src !== nextUrl) {
+        audio.src = nextUrl;
+        audio.load();
       }
-    } catch {
-      /* ignore stale refs */
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!expanded) return;
-    const timer = setTimeout(openPanel, 60);
-    return () => clearTimeout(timer);
-  }, [expanded, openPanel]);
-
-  const results = useMemo(() => {
-    const term = query.trim().toLowerCase();
-    if (!term) return SURAHS.slice(0, 50);
-    return SURAHS
-      .filter(
-        (surah) =>
-          surah.name.toLowerCase().includes(term) ||
-          String(surah.number) === term,
-      )
-      .slice(0, 60);
-  }, [query]);
-
-  const current = SURAHS[state.surah - 1] ?? SURAHS[0];
-
-  const handlePlay = useCallback(() => {
-    quranPlayer.toggle();
-    setError(null);
-  }, []);
-
-  const handlePlaySurah = useCallback(
-    (surah: number) => {
-      quranPlayer.play(surah);
-      setError(null);
     },
     [],
   );
 
-  const handleError = useCallback(() => {
-    if (state.error) {
-      setError(state.error);
+  const clearError = useCallback(() => setError(null), []);
+  const setBlockedError = useCallback(() => setError("Playback was blocked."), []);
+
+  const handlePlaySurah = useCallback(
+    (next: number) => {
+      const clamped = Math.min(Math.max(1, next), SURAHS.length);
+      setSurah(clamped);
+      writeStored(clamped, expanded);
+      clearError();
+      setAudioSrc(surahAudioUrl(clamped));
+      const audio = audioRef.current;
+      if (!audio) return;
+      audio
+        .play()
+        .then(() => clearError())
+        .catch(() => setBlockedError());
+    },
+    [expanded, setAudioSrc, clearError, setBlockedError],
+  );
+
+  const handlePlay = useCallback(() => {
+    clearError();
+    const audio = audioRef.current;
+    if (!audio) {
+      setAudioSrc(surahAudioUrl(surah));
+      return;
     }
-  }, [state.error]);
+    if (audio.paused) {
+      audio
+        .play()
+        .then(() => clearError())
+        .catch(() => setBlockedError());
+    } else {
+      audio.pause();
+    }
+  }, [audioRef, surah, setAudioSrc, clearError, setBlockedError]);
+
+  const handlePause = useCallback(() => {
+    audioRef.current?.pause();
+  }, []);
+
+  const handleStop = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.pause();
+    audio.currentTime = 0;
+  }, []);
+
+  const handleNext = useCallback(
+    () => handlePlaySurah(Math.min(SURAHS.length, surah + 1)),
+    [surah, handlePlaySurah],
+  );
+
+  const handlePrevious = useCallback(
+    () => handlePlaySurah(Math.max(1, surah - 1)),
+    [surah, handlePlaySurah],
+  );
+
+  const handleToggleExpanded = useCallback(() => {
+    const next = !expanded;
+    setExpanded(next);
+    writeStored(surah, next);
+  }, [expanded, surah]);
+
+  const openPanel = useCallback(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    const current = dialog.querySelector("[data-quran-surah]");
+    if (!current) return;
+    const top = current.getBoundingClientRect().top;
+    dialog.scrollTo({
+      top: dialog.scrollTop + top,
+      behavior: "smooth",
+    });
+  }, []);
 
   useEffect(() => {
-    handleError();
-  }, [state.error, handleError]);
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    audio.addEventListener("error", clearError);
+    audio.addEventListener("ended", clearError);
+    audio.addEventListener("timeupdate", clearError);
+    audio.addEventListener("canplay", clearError);
+    audio.addEventListener("play", clearError);
+
+    return () => {
+      audio.removeEventListener("error", clearError);
+      audio.removeEventListener("ended", clearError);
+      audio.removeEventListener("timeupdate", clearError);
+      audio.removeEventListener("canplay", clearError);
+      audio.removeEventListener("play", clearError);
+    };
+  }, [audioRef, clearError]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    writeStored(surah, expanded);
+    setAudioSrc(surahAudioUrl(surah));
+  }, [surah, expanded, setAudioSrc]);
+
+  if (typeof window === "undefined") {
+    return (
+      <div className="relative z-40">
+        <button
+          type="button"
+          className="fixed right-4 z-40"
+          style={{
+            bottom: "calc(16px + env(safe-area-inset-bottom))",
+          }}
+          aria-label="Show Surah list"
+          aria-expanded={false}
+          disabled
+        >
+          <div
+            className={cn(
+              "pointer-events-none rounded-full ring-2 ring-offset-2 ring-offset-background transition-opacity",
+              "opacity-40",
+            )}
+          />
+          <div className="pointer-events-auto flex items-center gap-2">
+            <button
+              type="button"
+              disabled
+              className="grid size-10 cursor-pointer place-items-center rounded-full border bg-card text-muted-foreground shadow-lg"
+            >
+              <ListMusic className="size-4" aria-hidden />
+            </button>
+            <button
+              type="button"
+              disabled
+              className="grid size-12 shrink-0 cursor-pointer place-items-center rounded-full bg-primary text-primary-foreground shadow-xl"
+            >
+              <Headphones className="size-5" aria-hidden />
+            </button>
+          </div>
+        </button>
+      </div>
+    );
+  }
+
+  const audio = audioRef.current;
+  const currentTime = audio?.currentTime ?? 0;
+  const duration = audio?.duration ?? 0;
+  const isPaused = audio?.paused ?? true;
+  const isMuted = audio?.muted ?? false;
 
   return (
     <div className="relative z-40">
-      {state.expanded ? (
+      {expanded && (
         <div
-          ref={panel}
+          ref={dialogRef}
+          data-quran-player
           className="pointer-events-auto z-40 flex w-full flex-col overflow-auto bg-card shadow-2xl border border-border sm:rounded-xl sm:border"
           style={{
             width: "100%",
-            maxWidth: `${panelMaxWidth}px`,
+            maxWidth: "360px",
             maxHeight: "calc(100vh - 104px - env(safe-area-inset-bottom))",
             bottom: "calc(48px + env(safe-area-inset-bottom))",
             right: "16px",
@@ -172,14 +236,16 @@ export function FloatingQuranPlayer() {
               <Headphones className="size-3.5 text-primary" aria-hidden />
               Quran Player
             </p>
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon"
               aria-label="Minimize player"
-              className="cursor-pointer rounded-md p-1 text-muted-foreground transition-colors hover:text-foreground"
-              onClick={() => setExpanded(false)}
+              className="rounded-md"
+              onClick={handleToggleExpanded}
             >
-              <ChevronUp className="size-4" aria-hidden />
-            </button>
+              <Search className="size-4" aria-hidden />
+            </Button>
           </div>
 
           <div className="space-y-2 border-b border-border px-3 py-3 sm:px-4">
@@ -188,108 +254,17 @@ export function FloatingQuranPlayer() {
                 {current.name}
               </span>
               <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-                {formatTime(state.currentTime)}
-                {state.duration > 0 ? ` / ${formatTime(state.duration)}` : ""}
+                {Math.floor(currentTime / 60)}:
+                {String(Math.floor(currentTime % 60)).padStart(2, "0")}
+                {duration > 0
+                  ? ` / ${Math.floor(duration / 60)}:${
+                      String(Math.floor(duration % 60)).padStart(2, "0")
+                    }`
+                  : ""}
               </span>
             </div>
 
-            <Slider
-              value={[
-                state.duration > 0
-                  ? (state.currentTime / state.duration) * 100
-                  : 0,
-              ]}
-              max={100}
-              step={0.1}
-              aria-label="Seek"
-              onValueChange={([value]) => {
-                if (state.duration > 0) {
-                  quranPlayer.seek((value / 100) * state.duration);
-                }
-              }}
-            />
-
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  aria-label="Previous Surah"
-                  disabled={state.surah <= 1}
-                  className="cursor-pointer rounded-full p-1.5 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
-                  onClick={() => quranPlayer.previous()}
-                >
-                  {"<"}
-                </button>
-                <button
-                  type="button"
-                  aria-label={state.playing ? "Pause" : "Play"}
-                  onClick={handlePlay}
-                  className="grid size-8 cursor-pointer place-items-center rounded-full bg-primary text-primary-foreground transition-transform active:scale-95"
-                >
-                  {state.playing ? (
-                    <Pause className="size-4" aria-hidden />
-                  ) : (
-                    <Play className="size-4 translate-x-px" aria-hidden />
-                  )}
-                </button>
-                <button
-                  type="button"
-                  aria-label="Next Surah"
-                  disabled={state.surah >= SURAHS.length}
-                  className="cursor-pointer rounded-full p-1.5 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
-                  onClick={() => quranPlayer.next()}
-                >
-                  {">"}
-                </button>
-                <button
-                  type="button"
-                  aria-label="Stop"
-                  className="cursor-pointer rounded-full p-1.5 text-muted-foreground transition-colors hover:text-foreground"
-                  onClick={() => quranPlayer.stop()}
-                >
-                  <Square className="size-3.5" aria-hidden />
-                </button>
-              </div>
-
-              <div className="flex items-center justify-between gap-2">
-                <button
-                  type="button"
-                  aria-label={state.muted ? "Unmute" : "Mute"}
-                  className="cursor-pointer rounded-full p-1 text-muted-foreground transition-colors hover:text-foreground"
-                  onClick={() => quranPlayer.toggleMute()}
-                >
-                  {state.muted ? (
-                    <VolumeX className="size-4" aria-hidden />
-                  ) : (
-                    <Volume2 className="size-4" aria-hidden />
-                  )}
-                </button>
-                <Slider
-                  value={[state.muted ? 0 : state.volume * 100]}
-                  max={100}
-                  step={1}
-                  aria-label="Volume"
-                  onValueChange={([value]) =>
-                    quranPlayer.setVolume(value / 100)
-                  }
-                  className="w-20"
-                />
-              </div>
-            </div>
-          </div>
-
-          {state.error ? (
-            <p className="text-xs text-destructive">{state.error}</p>
-          ) : error ? (
-            <p className="text-xs text-destructive">{error}</p>
-          ) : null}
-
-          <div className="px-3 pt-3 sm:px-4 sm:pt-4">
             <div className="relative">
-              <Search
-                className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
-                aria-hidden
-              />
               <Input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
@@ -298,55 +273,139 @@ export function FloatingQuranPlayer() {
                 aria-label="Search Surah"
                 className="h-9 pl-9"
               />
+              <Search
+                className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+                aria-hidden
+              />
             </div>
           </div>
 
-          <ul className="max-h-48 overflow-y-auto p-2">
-            {results.length === 0 ? (
-              <li className="px-2 py-6 text-center text-sm text-muted-foreground">
-                No Surah matches "{query}".
-              </li>
-            ) : (
-              results.map((surah) => (
-                <li key={surah.number}>
-                  <button
-                    data-quran-surah
-                    type="button"
-                    onClick={() => handlePlaySurah(surah.number)}
-                    className={cn(
-                      "flex w-full cursor-pointer items-center gap-3 rounded-md px-2.5 py-2 text-left text-sm transition-colors hover:bg-accent/60",
-                      surah.number === state.surah &&
-                        "bg-primary/10 text-primary",
-                    )}
-                  >
-                    <span className="w-6 shrink-0 text-xs text-muted-foreground tabular-nums">
-                      {surah.number}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate">
-                      {surah.name}
-                    </span>
-                    <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-                      {surah.ayahs}
-                    </span>
-                  </button>
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2 sm:px-4">
+            <div className="flex items-center gap-1">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label="Previous Surah"
+                disabled={surah <= 1}
+                className="rounded-full"
+                onClick={handlePrevious}
+              >
+                <span className="text-sm">{"<"}</span>
+              </Button>
+              <Button
+                type="button"
+                variant="default"
+                size="icon"
+                aria-label={isPaused ? "Play" : "Pause"}
+                className="rounded-full"
+                onClick={isPaused ? handlePlay : handlePause}
+              >
+                {isPaused ? (
+                  <Play className="size-4" aria-hidden />
+                ) : (
+                  <Pause className="size-4" aria-hidden />
+                )}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label="Next Surah"
+                disabled={surah >= SURAHS.length}
+                className="rounded-full"
+                onClick={handleNext}
+              >
+                <span className="text-sm">{">"}</span>
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label="Stop"
+                className="rounded-full"
+                onClick={handleStop}
+              >
+                <span className="text-sm">{"■"}</span>
+              </Button>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label={isMuted ? "Unmute" : "Mute"}
+                className="rounded-full"
+                onClick={() => {
+                  if (!audio) return;
+                  audio.muted = !audio.muted;
+                }}
+              >
+                {isMuted ? (
+                  <span className="text-sm">🔇</span>
+                ) : (
+                  <span className="text-sm">🔊</span>
+                )}
+              </Button>
+            </div>
+          </div>
+
+          {error ? (
+            <p className="text-xs text-destructive px-3">{error}</p>
+          ) : null}
+
+          <div className="px-3 pt-3 sm:px-4 sm:pt-4">
+            <ul className="max-h-48 overflow-y-auto p-2">
+              {results.length === 0 ? (
+                <li className="px-2 py-6 text-center text-sm text-muted-foreground">
+                  No Surah matches "{query}".
                 </li>
-              ))
-            )}
-          </ul>
+              ) : (
+                results.map((item) => (
+                  <li key={item.number}>
+                    <button
+                      type="button"
+                      data-quran-surah
+                      onClick={() => handlePlaySurah(item.number)}
+                      className={cn(
+                        "flex w-full cursor-pointer items-center gap-3 rounded-md px-2.5 py-2 text-left text-sm transition-colors hover:bg-accent/60",
+                        item.number === surah &&
+                          "bg-primary/10 text-primary",
+                      )}
+                    >
+                      <span className="w-6 shrink-0 text-xs text-muted-foreground tabular-nums">
+                        {item.number}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate">
+                        {item.name}
+                      </span>
+                      <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+                        {item.ayahs}
+                      </span>
+                    </button>
+                  </li>
+                ))
+              )}
+            </ul>
+          </div>
         </div>
-      ) : null}
+      )}
 
       <button
         type="button"
         className="fixed right-4 z-40"
-        style={{ bottom: "calc(16px + env(safe-area-inset-bottom))" }}
+        style={{
+          bottom: "calc(16px + env(safe-area-inset-bottom))",
+        }}
         aria-label={expanded ? "Hide Surah list" : "Show Surah list"}
         aria-expanded={expanded}
+        onClick={handleToggleExpanded}
       >
         <div
           className={cn(
             "pointer-events-none rounded-full ring-2 ring-offset-2 ring-offset-background transition-opacity",
-            state.playing ? "opacity-100" : "opacity-40",
+            isPaused ? "opacity-40" : "opacity-100",
           )}
         />
         <div className="pointer-events-auto flex items-center gap-2">
@@ -358,27 +417,21 @@ export function FloatingQuranPlayer() {
               "grid size-10 cursor-pointer place-items-center rounded-full border bg-card text-muted-foreground shadow-lg transition-colors hover:text-foreground",
               expanded && "text-foreground",
             )}
-            onClick={() => {
-              const next = !expanded;
-              setExpanded(next);
-              if (next) {
-                openPanel();
-              }
-            }}
+            onClick={openPanel}
           >
             <ListMusic className="size-4" aria-hidden />
           </button>
 
           <button
             type="button"
-            aria-label={state.playing ? "Pause Quran" : "Play Quran"}
-            onClick={handlePlay}
+            aria-label={isPaused ? "Play Quran" : "Pause Quran"}
+            onClick={isPaused ? handlePlay : handlePause}
             className="grid size-12 shrink-0 cursor-pointer place-items-center rounded-full bg-primary text-primary-foreground shadow-xl transition-transform active:scale-95"
           >
-            {state.playing ? (
-              <Pause className="size-5" aria-hidden />
-            ) : (
+            {isPaused ? (
               <Headphones className="size-5" aria-hidden />
+            ) : (
+              <Pause className="size-5" aria-hidden />
             )}
           </button>
         </div>
