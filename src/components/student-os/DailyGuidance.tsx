@@ -77,7 +77,7 @@ export function DailyGuidance() {
             </Button>
           </span>
         ) : entry ? (
-          <p className="truncate text-sm text-foreground">
+          <p className="line-clamp-2 text-sm break-words text-foreground">
             “{entry.english}”{" "}
             <span className="text-muted-foreground">
               — Quran {entry.surah}:{entry.ayah}

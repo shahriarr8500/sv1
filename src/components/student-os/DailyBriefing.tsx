@@ -122,9 +122,12 @@ export function DailyBriefing() {
         AI Summary
       </h2>
 
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm text-foreground">{headline}</p>
-        <p className="truncate text-xs text-muted-foreground">{detail}</p>
+      <div className="min-w-0 flex-1 basis-56">
+        {/* Wrap to 2 lines instead of truncating mid-sentence on phones. */}
+        <p className="line-clamp-2 text-sm text-foreground">{headline}</p>
+        <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
+          {detail}
+        </p>
       </div>
     </section>
   );

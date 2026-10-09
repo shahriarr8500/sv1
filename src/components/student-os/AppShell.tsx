@@ -385,7 +385,10 @@ export function AppShell() {
   if (!profile) return <Navigate to="/onboarding" replace />;
 
   return (
-    <div className="min-h-screen bg-background">
+    // `max-w-full overflow-x-hidden` is the final safety net on the app root:
+    // real overflow causes are fixed in each component, and this only catches
+    // anything a future change might accidentally introduce.
+    <div className="w-full max-w-full overflow-x-hidden bg-background">
       <ImpersonationBanner />
       <header className="sticky top-0 z-40 flex h-14 items-center gap-3 border-b bg-background px-4 lg:hidden">
         <Button
@@ -414,7 +417,10 @@ export function AppShell() {
       </aside>
 
       <Sheet open={navOpen} onOpenChange={setNavOpen}>
-        <SheetContent side="left" className="w-72 gap-0 p-0 sm:max-w-72">
+        <SheetContent
+          side="left"
+          className="w-[85vw] max-w-80 gap-0 overflow-y-auto p-0 sm:w-72 sm:max-w-72"
+        >
           <SheetTitle className="sr-only">Student OS V1 navigation</SheetTitle>
           <SheetDescription className="sr-only">
             Jump to your dashboard, subjects, goal, or settings.
@@ -433,8 +439,8 @@ export function AppShell() {
         </SheetContent>
       </Sheet>
 
-      <div className="lg:pl-64">
-        <main className="mx-auto w-full max-w-6xl px-4 pt-6 pb-36 sm:px-6 lg:px-8 lg:pt-10 lg:pb-16">
+      <div className="w-full max-w-full lg:pl-64">
+        <main className="mx-auto w-full max-w-full px-4 pt-6 pb-36 sm:px-6 lg:max-w-6xl lg:px-8 lg:pt-10 lg:pb-16">
           <Outlet />
         </main>
       </div>

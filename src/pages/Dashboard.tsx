@@ -157,23 +157,29 @@ export default function DashboardPage() {
         <DailyBriefing />
       </div>
 
-      {/* Secondary entry point — never louder than the mission. */}
+      {/* Secondary entry point — never louder than the mission.
+          One continuous sentence that wraps, with the link on its own stable
+          spot: [icon] [text] [link], stacked cleanly on narrow screens. */}
       <Link
         to="/ashy"
-        className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-card px-4 py-3 transition-colors hover:border-primary/40 hover:bg-accent/40"
+        className="flex flex-col gap-2 rounded-xl border bg-card px-4 py-3 transition-colors hover:border-primary/40 hover:bg-accent/40 sm:flex-row sm:items-center sm:justify-between sm:gap-3"
       >
-        <span className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
+        <span className="flex min-w-0 items-start gap-2 text-sm break-words text-muted-foreground">
           <span
             aria-hidden
-            className="grid size-6 shrink-0 place-items-center rounded-md bg-primary/10 text-primary"
+            className="mt-0.5 grid size-6 shrink-0 place-items-center rounded-md bg-primary/10 text-primary"
           >
             <Sparkles className="size-3.5" />
           </span>
-          Stuck on something? Ask{" "}
-          <span className="font-medium text-foreground">Ashy</span>, your study
-          assistant.
+          <span className="min-w-0">
+            Stuck on something? Ask{" "}
+            <span className="font-medium text-foreground">Ashy</span>, your
+            study assistant.
+          </span>
         </span>
-        <span className="text-xs font-medium text-primary">Ask Ashy →</span>
+        <span className="shrink-0 pl-8 text-xs font-medium text-primary sm:pl-0">
+          Ask Ashy →
+        </span>
       </Link>
 
       {/* 6. Continue studying */}

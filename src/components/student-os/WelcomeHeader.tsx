@@ -56,7 +56,7 @@ export function WelcomeHeader() {
     >
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
         <div className="min-w-0">
-          <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
+          <h1 className="text-3xl font-bold tracking-tight break-words sm:text-4xl">
             {greeting}
             {name ? `, ${name}` : ""}.
           </h1>

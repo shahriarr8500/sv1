@@ -92,7 +92,7 @@ export function FloatingQuranPlayer() {
           ref={panelRef}
           data-quran-player
           className={cn(
-            "pointer-events-auto fixed right-4 left-auto flex w-[calc(100vw-2rem)] flex-col overflow-auto rounded-xl border bg-card shadow-2xl sm:w-[360px]",
+            "pointer-events-auto fixed right-4 left-auto flex w-[calc(100dvw-2rem)] flex-col overflow-y-auto rounded-xl border bg-card shadow-2xl sm:w-[360px]",
             PANEL_BOTTOM,
           )}
           style={{

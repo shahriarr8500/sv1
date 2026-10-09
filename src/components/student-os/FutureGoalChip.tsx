@@ -32,7 +32,7 @@ export function FutureGoalChip() {
   if (!editing) {
     return (
       <div
-        className="inline-flex flex-wrap items-center gap-3 rounded-xl border bg-[#18181a] px-4 py-3 text-sm shadow-sm"
+        className="inline-flex w-full max-w-full flex-wrap items-center gap-3 rounded-xl border bg-[#18181a] px-4 py-3 text-sm shadow-sm sm:w-auto"
         role="group"
         aria-label="Future goal"
       >
@@ -48,9 +48,9 @@ export function FutureGoalChip() {
           Goal
         </span>
 
-        <span className="min-w-0 flex-1">
+        <span className="min-w-0 flex-1 basis-40">
           {goalDraft ? (
-            <span className="truncate">
+            <span className="block truncate">
               “{goalDraft}”
               {targetDraft ? ` · ${targetDraft}` : null}
             </span>
@@ -112,7 +112,7 @@ export function FutureGoalChip() {
         });
         setEditing(false);
       }}
-      className="inline-flex flex-wrap items-center gap-3 rounded-xl border bg-[#18181a] px-4 py-3 text-sm shadow-sm"
+      className="inline-flex w-full max-w-full flex-wrap items-center gap-3 rounded-xl border bg-[#18181a] px-4 py-3 text-sm shadow-sm sm:w-auto"
     >
       <span
         className="inline-flex items-center gap-2 rounded-lg border border-slate-700/60 bg-[#2c3545] px-2.5 py-1.5 text-xs font-medium text-sky-300"
