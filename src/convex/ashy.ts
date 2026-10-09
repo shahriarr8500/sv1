@@ -53,6 +53,16 @@ function fail(kind: FailureKind): Result {
   return { ok: false, kind, message: FAILURE_MESSAGES[kind] };
 }
 
+/**
+ * Provider detail that is safe to write to the backend logs: API keys are
+ * redacted and the line is capped. Nothing here ever reaches the client.
+ */
+function sanitizeLog(detail: unknown): string {
+  const raw =
+    typeof detail === "string" ? detail : JSON.stringify(detail) ?? String(detail);
+  return raw.replace(/AIza[0-9A-Za-z_-]{10,}/g, "[redacted]").slice(0, 500);
+}
+
 interface ChatImage {
   mimeType: string;
   data: string;
@@ -122,7 +132,10 @@ export const chat = action({
     if (identity === null) return fail("unauthorized");
 
     const key = process.env.GEMINI_API_KEY?.trim();
-    if (!key) return fail("unavailable");
+    if (!key) {
+      console.error("[ashy] GEMINI_API_KEY is not set on this deployment.");
+      return fail("unavailable");
+    }
 
     // --- Validation -----------------------------------------------------
     if (args.history.length === 0 || args.history.length > MAX_HISTORY) {
@@ -183,16 +196,36 @@ export const chat = action({
         `${API_BASE}/${encodeURIComponent(model)}:generateContent`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...body, key }),
+          // The key goes in a header, never in the JSON body: the Generative
+          // Language API rejects unknown body fields with 400 INVALID_ARGUMENT
+          // ("Unknown name \"key\""), which used to surface as a generic
+          // "temporarily unavailable" failure.
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": key,
+          },
+          body: JSON.stringify(body),
           signal: AbortSignal.timeout(60_000),
         },
       );
-    } catch {
+    } catch (error) {
+      console.error(`[ashy] Gemini request error: ${sanitizeLog(error)}`);
       return fail("unavailable");
     }
 
     if (!response.ok) {
+      let detail = "";
+      try {
+        const payload = (await response.json()) as {
+          error?: { status?: string; message?: string };
+        };
+        detail = [payload.error?.status, payload.error?.message]
+          .filter(Boolean)
+          .join(" — ");
+      } catch {
+        // Non-JSON error body; the status alone still identifies the failure.
+      }
+      console.error(`[ashy] Gemini HTTP ${response.status}: ${sanitizeLog(detail)}`);
       return fail(kindForStatus(response.status));
     }
 
