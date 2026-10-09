@@ -52,7 +52,7 @@ export function DailyGuidance() {
   return (
     <section
       aria-labelledby="daily-guidance-heading"
-      className="flex flex-col gap-2 rounded-xl border bg-card px-4 py-3 sm:flex-row sm:items-start sm:gap-4"
+      className="flex h-auto flex-col gap-2 rounded-xl border bg-card p-4 sm:flex-row sm:items-start sm:gap-4"
     >
       <h2
         id="daily-guidance-heading"
@@ -64,7 +64,10 @@ export function DailyGuidance() {
         Daily Guidance
       </h2>
 
-      <div className="min-w-0 flex-1 basis-80">
+      {/* `basis-80` only from sm up: below 640px the card is a flex COLUMN,
+          and a 20rem flex-basis there would become a 320px *height*, which
+          is exactly what made this card almost a full screen tall on phones. */}
+      <div className="min-w-0 flex-1 sm:basis-80">
         {!settled ? (
           <Skeleton className="h-4 w-2/3" />
         ) : error ? (

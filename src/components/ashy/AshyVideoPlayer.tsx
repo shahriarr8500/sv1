@@ -225,6 +225,11 @@ export function AshyVideoPlayer({
       const player = new api.Player(mount, {
         host: "https://www.youtube-nocookie.com",
         videoId: video.videoId,
+        // Percentage sizing so the generated iframe never carries a stale
+        // pixel size (the API's default is 640x390, which cropped the video
+        // on phones). CSS on the frame below is the real guarantee.
+        width: "100%",
+        height: "100%",
         playerVars: {
           autoplay: 1, // only ever reached after the student's Play click
           controls: 0, // our controls below the video own the UI
@@ -589,7 +594,10 @@ export function AshyVideoPlayer({
   const videoFrame = (
     <div
       ref={frameRef}
-      className="relative aspect-video w-full overflow-hidden rounded-xl bg-black select-none"
+      // The IFrame API REPLACES the mount div below with an <iframe> that
+      // does not inherit its classes, so the iframe is sized from here:
+      // absolutely positioned, exactly the frame's box, never scaled.
+      className="relative aspect-video w-full overflow-hidden rounded-xl bg-black select-none [&_iframe]:absolute [&_iframe]:inset-0 [&_iframe]:h-full! [&_iframe]:w-full! [&_iframe]:max-w-none [&_iframe]:border-0 [&_iframe]:transform-none [&_iframe]:pointer-events-none"
     >
       {/* The IFrame API replaces this div with the youtube-nocookie iframe.
           `pointer-events: none` (inherited) keeps every click on our overlay. */}

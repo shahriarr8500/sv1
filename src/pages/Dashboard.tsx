@@ -151,8 +151,9 @@ export default function DashboardPage() {
         <TodayMissions />
       </StudentOSTargetsErrorBoundary>
 
-      {/* 5. Daily Guidance + AI summary */}
-      <div className="grid gap-4 sm:grid-cols-2">
+      {/* 5. Daily Guidance + AI summary — items-start so neither card is
+          stretched to its row's height; content decides the height. */}
+      <div className="grid items-start gap-4 sm:grid-cols-2">
         <DailyGuidance />
         <DailyBriefing />
       </div>
