@@ -4,8 +4,8 @@
   "description": "Your all-in-one companion for the academic journey and the lifelong path to achievement.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#2563eb",
+  "background_color": "#0a0a0a",
+  "theme_color": "#0a0a0a",
   "icons": [
     {
       "src": "/logo.svg",
