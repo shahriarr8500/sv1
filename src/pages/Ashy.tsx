@@ -15,10 +15,12 @@ import { toast } from "sonner";
 import {
   AlertTriangle,
   ArrowUp,
+  Camera,
   Check,
   Copy,
   Crop,
   History,
+  Image as ImageIcon,
   ImagePlus,
   Mic,
   Paperclip,
@@ -41,6 +43,7 @@ import {
 import { api } from "@/convex/_generated/api";
 import { cn } from "@/lib/utils";
 import { MessageContent } from "@/components/ashy/MessageContent";
+import { CameraCaptureDialog } from "@/components/ashy/CameraCaptureDialog";
 import {
   ImageCropDialog,
   MAX_IMAGE_BYTES,
@@ -158,6 +161,12 @@ export default function AshyPage() {
   const [pendingImage, setPendingImage] = useState<string | null>(null);
   const [cropOpen, setCropOpen] = useState(false);
   const [cropSrc, setCropSrc] = useState<string | null>(null);
+  /** True when the crop dialog is showing a photo taken with the camera. */
+  const [cropFromCamera, setCropFromCamera] = useState(false);
+  /** Attach menu (paperclip) open state — also reopened by "Replace". */
+  const [attachOpen, setAttachOpen] = useState(false);
+  /** "Take photo" modal for devices without a capture input. */
+  const [cameraOpen, setCameraOpen] = useState(false);
   const [listening, setListening] = useState(false);
   const [speakingId, setSpeakingId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -168,6 +177,7 @@ export default function AshyPage() {
   const requestIdRef = useRef(0);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const captureInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const dictationRef = useRef<ReturnType<typeof createDictation> | null>(null);
   const draftBeforeVoiceRef = useRef("");
@@ -343,37 +353,75 @@ export default function AshyPage() {
     input.click();
   }, []);
 
-  const handleFile = useCallback(async (file: File | undefined) => {
-    if (!file) return; // student cancelled the picker — nothing to do
-    if (!isAcceptedImage(file)) {
-      // TEMP DIAGNOSTIC (no file contents, just type/size) — remove after verifying live.
-      console.error(`[ashy-diag] picker: unsupported type "${file.type}"`);
-      toast("Unsupported image", {
-        description:
-          "Please use a PNG, JPEG, or WebP image. HEIC/HEIF isn't supported by this browser's image tools.",
-      });
-      return;
+  const handleFile = useCallback(
+    async (file: File | undefined, source: "gallery" | "camera" = "gallery") => {
+      if (!file) return; // student cancelled the picker — nothing to do
+      if (!isAcceptedImage(file)) {
+        // TEMP DIAGNOSTIC (no file contents, just type/size) — remove after verifying live.
+        console.error(`[ashy-diag] picker: unsupported type "${file.type}"`);
+        toast("Unsupported image", {
+          description:
+            "Please use a PNG, JPEG, or WebP image. HEIC/HEIF isn't supported by this browser's image tools.",
+        });
+        return;
+      }
+      if (file.size > MAX_IMAGE_BYTES) {
+        console.error(`[ashy-diag] picker: file too large (${file.size} bytes)`);
+        toast("Image too large", {
+          description: "Please choose an image under 8 MB.",
+        });
+        return;
+      }
+      try {
+        const dataUrl = await readImageFile(file);
+        setPreviewLarge(false);
+        setCropFromCamera(source === "camera");
+        setCropSrc(dataUrl);
+        setCropOpen(true);
+      } catch (error) {
+        console.error(
+          "[ashy-diag] picker: could not read file",
+          error instanceof Error ? error.message : "unknown",
+        );
+        toast("Couldn't read that image", { description: "Please try another file." });
+      }
+    },
+    [],
+  );
+
+  /* --- take photo (camera) --------------------------------------------- */
+
+  /**
+   * Routes "Take photo" to the right path: touch devices with a native
+   * camera-capture input use it (cheap, battery-friendly, native UX);
+   * everything else opens the getUserMedia modal. Never runs on its own —
+   * only from the attach menu or a Retake.
+   */
+  const openCameraFlow = useCallback(() => {
+    const hasCaptureInput =
+      typeof window !== "undefined" &&
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(pointer: coarse)").matches;
+    if (hasCaptureInput) {
+      const input = captureInputRef.current;
+      if (input) {
+        input.value = ""; // reset so the same photo can be re-taken
+        input.click();
+        return;
+      }
     }
-    if (file.size > MAX_IMAGE_BYTES) {
-      console.error(`[ashy-diag] picker: file too large (${file.size} bytes)`);
-      toast("Image too large", {
-        description: "Please choose an image under 8 MB.",
-      });
-      return;
-    }
-    try {
-      const dataUrl = await readImageFile(file);
-      setPreviewLarge(false);
-      setCropSrc(dataUrl);
-      setCropOpen(true);
-    } catch (error) {
-      console.error(
-        "[ashy-diag] picker: could not read file",
-        error instanceof Error ? error.message : "unknown",
-      );
-      toast("Couldn't read that image", { description: "Please try another file." });
-    }
+    setCameraOpen(true);
   }, []);
+
+  const takePhoto = useCallback(() => {
+    setAttachOpen(false);
+    openCameraFlow();
+  }, [openCameraFlow]);
+
+  const chooseFromGallery = useCallback(() => {
+    setAttachOpen(false);
+    openFilePicker();
+  }, [openFilePicker]);
 
   /* --- voice ------------------------------------------------------------- */
 
@@ -726,7 +774,7 @@ export default function AshyPage() {
             variant="outline"
             size="sm"
             className="h-8 cursor-pointer text-xs"
-            onClick={openFilePicker}
+            onClick={() => setAttachOpen(true)}
             disabled={busy}
           >
             <ImagePlus className="size-3.5" aria-hidden />
@@ -766,18 +814,70 @@ export default function AshyPage() {
             event.target.value = "";
           }}
         />
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          aria-label="Choose image"
-          title="Choose image"
-          className="shrink-0 text-muted-foreground"
-          disabled={busy}
-          onClick={openFilePicker}
-        >
-          <Paperclip className="size-4" aria-hidden />
-        </Button>
+        {/* Second input: native camera capture on mobile/tablet. Reset before
+            every open so the same photo can be re-taken. */}
+        <input
+          ref={captureInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          className="hidden"
+          tabIndex={-1}
+          aria-hidden="true"
+          onChange={(event) => {
+            void handleFile(event.target.files?.[0], "camera");
+            event.target.value = "";
+          }}
+        />
+        <Popover open={attachOpen} onOpenChange={setAttachOpen}>
+          <PopoverTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              aria-label="Attach"
+              aria-haspopup="menu"
+              title="Attach"
+              className="shrink-0 text-muted-foreground"
+              disabled={busy}
+            >
+              <Paperclip className="size-4" aria-hidden />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent
+            align="start"
+            sideOffset={8}
+            className="w-56 p-1.5"
+          >
+            <div
+              role="menu"
+              aria-label="Attach options"
+              className="flex flex-col"
+            >
+              <button
+                type="button"
+                role="menuitem"
+                onClick={takePhoto}
+                className="flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+              >
+                <Camera className="size-4 text-muted-foreground" aria-hidden />
+                Take photo
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={chooseFromGallery}
+                className="flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+              >
+                <ImageIcon
+                  className="size-4 text-muted-foreground"
+                  aria-hidden
+                />
+                Choose from gallery
+              </button>
+            </div>
+          </PopoverContent>
+        </Popover>
 
         {canDictate ? (
           <Button
@@ -876,6 +976,28 @@ export default function AshyPage() {
           setCropSrc(null);
         }}
         onConfirm={(cropped) => setPendingImage(cropped)}
+        onRetake={
+          cropFromCamera
+            ? () => {
+                setCropOpen(false);
+                setCropSrc(null);
+                openCameraFlow(); // back to the camera for another shot
+              }
+            : undefined
+        }
+      />
+
+      <CameraCaptureDialog
+        open={cameraOpen}
+        onClose={() => setCameraOpen(false)}
+        onCapture={(file) => {
+          setCameraOpen(false);
+          void handleFile(file, "camera"); // same validation + crop dialog
+        }}
+        onChooseFromGallery={() => {
+          setCameraOpen(false);
+          openFilePicker();
+        }}
       />
     </div>
   );

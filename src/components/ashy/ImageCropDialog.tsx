@@ -28,6 +28,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import {
+  Camera,
   Crop,
   Move,
   RotateCcw,
@@ -173,12 +174,18 @@ export function ImageCropDialog({
   src,
   onClose,
   onConfirm,
+  onRetake,
 }: {
   open: boolean;
   src: string | null;
   onClose: () => void;
   /** Receives a cropped, resized `data:image/jpeg;base64,...` URL. */
   onConfirm: (croppedDataUrl: string) => void;
+  /**
+   * Optional — when the image came from the camera, offers a "Retake" button
+   * that sends the student back to the camera to shoot it again.
+   */
+  onRetake?: () => void;
 }) {
   const frameRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
@@ -187,6 +194,11 @@ export function ImageCropDialog({
 
   const [workingSrc, setWorkingSrc] = useState<string | null>(null);
   const [imageReady, setImageReady] = useState(false);
+  /** Natural pixel size of the working image — sizes the live preview box. */
+  const [naturalSize, setNaturalSize] = useState<{
+    w: number;
+    h: number;
+  } | null>(null);
   const [selection, setSelection] = useState<Rect>(FULL_RECT);
   const [zoom, setZoom] = useState(MIN_ZOOM);
   const [pan, setPan] = useState<Point>({ x: 0, y: 0 });
@@ -202,6 +214,7 @@ export function ImageCropDialog({
     setLastImageKey(imageKey);
     setWorkingSrc(imageKey || null);
     setImageReady(false);
+    setNaturalSize(null);
     setSelection(FULL_RECT);
     setZoom(MIN_ZOOM);
     setPan({ x: 0, y: 0 });
@@ -323,6 +336,7 @@ export function ImageCropDialog({
     try {
       setWorkingSrc(await rotate90(workingSrc));
       setImageReady(false);
+      setNaturalSize(null); // repopulated by the <img> onLoad below
       setSelection(FULL_RECT);
       setZoom(MIN_ZOOM);
       setPan({ x: 0, y: 0 });
@@ -344,6 +358,7 @@ export function ImageCropDialog({
   const handleReset = () => {
     setWorkingSrc(src); // undo any rotation bake
     setImageReady(false);
+    setNaturalSize(null);
     setSelection(FULL_RECT);
     setZoom(MIN_ZOOM);
     setPan({ x: 0, y: 0 });
@@ -433,6 +448,17 @@ export function ImageCropDialog({
   const handleSize = `${HANDLE_SIZE / zoom}px`;
   const showHandles = mode === "select" && imageReady;
 
+  /* --- live preview of the exact cropped region -------------------------- */
+  // The selection is a fraction of the image, so the preview box gets the
+  // selection's pixel aspect ratio and the image is laid inside it at
+  // 1/selection scale — the box then shows precisely what will be exported.
+  const previewW = Math.max(selection.w, 1e-4);
+  const previewH = Math.max(selection.h, 1e-4);
+  const previewAspect =
+    naturalSize && naturalSize.w > 0 && naturalSize.h > 0
+      ? (previewW * naturalSize.w) / (previewH * naturalSize.h)
+      : null;
+
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
       <DialogContent className="max-w-3xl gap-4">
@@ -472,7 +498,14 @@ export function ImageCropDialog({
                   alt="Selected attachment preview"
                   draggable={false}
                   className="block max-h-[55vh] max-w-full"
-                  onLoad={() => setImageReady(true)}
+                  onLoad={(event) => {
+                    setImageReady(true);
+                    const image = event.currentTarget;
+                    setNaturalSize({
+                      w: image.naturalWidth,
+                      h: image.naturalHeight,
+                    });
+                  }}
                   onError={() => {
                     // TEMP DIAGNOSTIC — decode failure of the data URL.
                     console.error("[ashy-diag] crop: image failed to decode");
@@ -610,7 +643,7 @@ export function ImageCropDialog({
               ? "Drag the image to reposition it."
               : "Drag to select, or pull a corner to resize."}
           </p>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button
               type="button"
               variant="outline"
@@ -620,6 +653,46 @@ export function ImageCropDialog({
               <X className="size-4" aria-hidden />
               Cancel
             </Button>
+            {onRetake ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="cursor-pointer"
+                onClick={onRetake}
+              >
+                <Camera className="size-4" aria-hidden />
+                Retake
+              </Button>
+            ) : null}
+
+            {/* Live preview of exactly the region that gets exported. */}
+            <div className="flex items-center gap-2 rounded-md border bg-muted/50 px-2 py-1.5">
+              <span className="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">
+                Preview
+              </span>
+              <div
+                className="relative overflow-hidden rounded border bg-muted"
+                style={{
+                  width: "4.5rem",
+                  aspectRatio: previewAspect ? `${previewAspect}` : "4 / 3",
+                }}
+              >
+                {workingSrc && previewAspect ? (
+                  <img
+                    src={workingSrc}
+                    alt="Live preview of the cropped area"
+                    className="absolute max-w-none"
+                    style={{
+                      width: `${100 / previewW}%`,
+                      height: `${100 / previewH}%`,
+                      left: `${(-selection.x / previewW) * 100}%`,
+                      top: `${(-selection.y / previewH) * 100}%`,
+                    }}
+                  />
+                ) : null}
+              </div>
+            </div>
+
             <Button
               type="button"
               className="cursor-pointer"
