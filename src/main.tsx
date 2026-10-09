@@ -151,7 +151,8 @@ createRoot(document.getElementById("root")!).render(
       <ConvexAuthProvider client={convex}>
         <ThemeProvider
           attribute="class"
-          defaultTheme="light"
+          defaultTheme="dark"
+          enableSystem={false}
           disableTransitionOnChange
         >
           <StudentOSProvider>

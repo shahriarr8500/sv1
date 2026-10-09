@@ -1,15 +1,30 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="dark" style="color-scheme: dark">
 
 <head>
   <meta charset="UTF-8" />
   <link rel="icon" type="image/svg+xml" href="/logo.svg" />
   <link rel="manifest" href="/manifest.webmanifest" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="color-scheme" content="dark light" />
+  <meta name="theme-color" content="#0a0a0a" />
   <meta name="description" content="Student OS V1 — your all-in-one companion for the academic journey and the lifelong path to achievement. Track an itemized syllabus, browse the catalog, and book sessions in one simple place." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <!-- Dark is the default now. next-themes reads localStorage["theme"] in its
+       own inline script during hydration, which runs AFTER this one, so this
+       migration is safe: any stored "system" (the old default, meaning the
+       student never chose) is rewritten to "dark" once. A deliberate
+       "light"/"dark" choice is untouched. Without this, enableSystem={false}
+       would leave stored "system" users on a classless (light) document. -->
+  <script>
+    try {
+      if (localStorage.getItem("theme") === "system") {
+        localStorage.setItem("theme", "dark");
+      }
+    } catch (e) { /* private mode — the html class below still holds */ }
+  </script>
   <title>Student OS V1 — Your Academic Companion</title>
 </head>
 

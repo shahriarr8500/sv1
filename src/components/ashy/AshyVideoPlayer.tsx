@@ -49,7 +49,6 @@ import {
   VolumeX,
   X,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import type { AshyVideo } from "@/lib/ashy";
@@ -399,8 +398,11 @@ export function AshyVideoPlayer({
   }, [mode, landscapePhone, playing]);
 
   useEffect(() => {
-    scheduleControlsHide();
+    // Deferred by a tick so the effect body itself never sets state
+    // synchronously (cascading renders) — identical behavior otherwise.
+    const kick = window.setTimeout(() => scheduleControlsHide(), 0);
     return () => {
+      window.clearTimeout(kick);
       if (controlsTimerRef.current) {
         window.clearTimeout(controlsTimerRef.current);
         controlsTimerRef.current = null;

@@ -153,7 +153,6 @@ export interface PlannerResult {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const WEEK_MS = 7 * DAY_MS;
-const MS_PER_MIN = 60 * 1000;
 const AVG_MONTH_DAYS = 30.4375;
 
 export function chapterLabel(chapter: Chapter): string {
@@ -381,7 +380,6 @@ export function computePlan(input: PlannerInput): PlannerResult {
   }
 
   const weeks: StudyWeek[] = [];
-  const remaining = [...all];
   let assigned = 0;
   let cursor = 0; // rotating subject pointer for variety
 
