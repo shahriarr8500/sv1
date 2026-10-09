@@ -264,7 +264,7 @@ export function TodayMissions() {
                   Today&apos;s mission
                 </p>
                 {nextLocation ? (
-                  <p className="min-w-0 truncate text-xs text-muted-foreground">
+                  <p className="min-w-0 text-xs break-words text-muted-foreground">
                     Next: {nextLocation.subject.name} ·{" "}
                     {chapterLabel(nextLocation.chapter)}
                   </p>

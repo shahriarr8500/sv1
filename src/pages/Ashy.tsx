@@ -23,6 +23,7 @@ import {
   History,
   Image as ImageIcon,
   ImagePlus,
+  ListChecks,
   Mic,
   Paperclip,
   Plus,
@@ -72,6 +73,10 @@ import {
   stopSpeaking,
 } from "@/lib/ashy";
 import { youtubeSearchUrl } from "@/lib/ashy-youtube";
+import { useTargets } from "@/state/targets";
+import { todayKey } from "@/lib/student-os/target-calendar";
+import { lookupItem } from "@/lib/student-os/syllabus";
+import { xpForSubject } from "@/lib/student-os/gamification";
 
 function emptyConversation(): AshyConversation {
   return { id: newId(), title: "New chat", messages: [] };
@@ -193,10 +198,13 @@ export default function AshyPage() {
   const [listening, setListening] = useState(false);
   const [speakingId, setSpeakingId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  /** Message id whose week-1 plan targets were just added to Missions. */
+  const [missionsAddedId, setMissionsAddedId] = useState<string | null>(null);
   /** Toggles the pending-attachment thumbnail between compact and enlarged. */
   const [previewLarge, setPreviewLarge] = useState(false);
 
   const chatAction = useAction(api.ashy.chat);
+  const { addMissions } = useTargets();
   const requestIdRef = useRef(0);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -210,6 +218,13 @@ export default function AshyPage() {
     [conversations, activeId],
   );
   const messages = active?.messages ?? [];
+  /** Only the newest search notice renders — once per conversation. */
+  const latestNoticeIndex = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      if (messages[i].searchNotice) return i;
+    }
+    return -1;
+  }, [messages]);
   const canSpeak = speechOutputSupported();
   const canDictate = speechInputSupported();
 
@@ -237,6 +252,34 @@ export default function AshyPage() {
     setDraft("");
     setPendingImage(null);
   }, []);
+
+  /**
+   * "Add this week's targets to Missions" — reuses the existing Missions
+   * creation function untouched (`addMissions` silently skips anything
+   * already planned for today) and shows exactly what will be created.
+   */
+  const addPlanMissions = useCallback(
+    (planMissions: { itemIds: string[]; labels: string[] }, messageId: string) => {
+      const xpById: Record<string, number> = {};
+      for (const itemId of planMissions.itemIds) {
+        const located = lookupItem(itemId);
+        xpById[itemId] = located ? xpForSubject(located.subject) : 25;
+      }
+      const added = addMissions(planMissions.itemIds, todayKey(), xpById);
+      if (added > 0) {
+        setMissionsAddedId(messageId);
+        toast(
+          `Added ${added} mission${added === 1 ? "" : "s"} for today`,
+          { description: "Open Missions to see them." },
+        );
+      } else {
+        toast("Nothing new to add", {
+          description: "Those targets are already planned for today.",
+        });
+      }
+    },
+    [addMissions],
+  );
 
   /* --- the request ------------------------------------------------------- */
 
@@ -268,8 +311,11 @@ export default function AshyPage() {
               sources: result.sources,
               searchQueries: result.searchQueries,
               searchNotice: result.searchNotice,
+              searchNoticeKind: result.searchNoticeKind,
               grounded: result.grounded,
               searchEntryPointUrl: result.searchEntryPointUrl,
+              chips: result.chips,
+              planMissions: result.planMissions,
             },
           ]);
         } else {
@@ -308,9 +354,9 @@ export default function AshyPage() {
     [chatAction, mutate, searchMode],
   );
 
-  const sendMessage = useCallback(async () => {
+  const sendMessage = useCallback(async (overrideText?: string) => {
     if (busy) return;
-    const text = draft.trim();
+    const text = (overrideText ?? draft).trim();
     const image = pendingImage
       ? { mimeType: "image/jpeg", data: stripDataUrlPrefix(pendingImage) }
       : null;
@@ -716,8 +762,10 @@ export default function AshyPage() {
                           </div>
                         ) : null}
 
-                        {message.searchNotice ? (
-                          <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+                        {/* Search notice: shown once per conversation (only
+                            on the newest notice), as a quiet inline note. */}
+                        {message.searchNotice && index === latestNoticeIndex ? (
+                          <p className="px-1 text-[11px] text-muted-foreground">
                             {message.searchNotice}
                           </p>
                         ) : null}
@@ -805,6 +853,65 @@ export default function AshyPage() {
                             </Button>
                           ) : null}
                         </div>
+
+                        {/* Quick-reply chips (planning clarifying questions). */}
+                        {message.chips?.length && isLast && isLastAssistant && !busy ? (
+                          <div className="flex flex-wrap gap-2 pt-0.5">
+                            {message.chips.map((chip) => (
+                              <button
+                                key={chip}
+                                type="button"
+                                className="cursor-pointer rounded-full border bg-card px-3 py-1.5 text-xs text-foreground transition-colors hover:border-primary/50 hover:bg-primary/5 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                                onClick={() => void sendMessage(chip)}
+                              >
+                                {chip}
+                              </button>
+                            ))}
+                          </div>
+                        ) : null}
+
+                        {/* Plan → one-click "Add week 1 to Missions". Shows
+                            exactly what will be created before it happens. */}
+                        {message.planMissions?.itemIds.length &&
+                        isLast &&
+                        isLastAssistant &&
+                        !busy ? (
+                          <div className="rounded-xl border bg-card p-3">
+                            <p className="text-xs font-semibold text-foreground">
+                              Add week 1 targets to Missions?
+                            </p>
+                            <ul className="mt-1.5 space-y-0.5">
+                              {message.planMissions.labels.map((label, i) => (
+                                <li
+                                  key={message.planMissions!.itemIds[i]}
+                                  className="text-xs text-muted-foreground"
+                                >
+                                  • {label}
+                                </li>
+                              ))}
+                            </ul>
+                            <div className="mt-2.5 flex items-center gap-2">
+                              <Button
+                                size="sm"
+                                className="h-8 cursor-pointer gap-1.5 px-3 text-xs"
+                                onClick={() =>
+                                  addPlanMissions(message.planMissions!, message.id)
+                                }
+                              >
+                                <ListChecks className="size-3.5" aria-hidden />
+                                Add {message.planMissions.itemIds.length}{" "}
+                                mission
+                                {message.planMissions.itemIds.length === 1 ? "" : "s"}
+                              </Button>
+                              {missionsAddedId === message.id ? (
+                                <span className="flex items-center gap-1 text-xs text-primary">
+                                  <Check className="size-3.5" aria-hidden />
+                                  Added to Missions
+                                </span>
+                              ) : null}
+                            </div>
+                          </div>
+                        ) : null}
                       </>
                     )}
                   </div>

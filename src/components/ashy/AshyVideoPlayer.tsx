@@ -711,8 +711,11 @@ export function AshyVideoPlayer({
           "relative flex min-w-0 flex-col overflow-hidden",
           isFull
             ? // Bottom sheet (mobile <768px shows full width; wider screens
-              // center as a modal card).
-              "w-full max-w-[100vw] max-h-[92dvh] overflow-y-auto rounded-t-2xl border bg-card p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl md:max-w-2xl md:rounded-xl"
+              // center as a modal card). Landscape phones get the full height
+              // so the 16:9 video is as large as possible.
+              landscapePhone
+                ? "w-full max-w-[100vw] max-h-[100dvh] overflow-y-auto rounded-none border bg-card p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] shadow-2xl md:max-w-2xl"
+                : "w-full max-w-[100vw] max-h-[92dvh] overflow-y-auto rounded-t-2xl border bg-card p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl md:max-w-2xl md:rounded-xl"
             : // Mini card
               "w-full rounded-xl border bg-card shadow-xl",
         )}

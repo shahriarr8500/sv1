@@ -38,6 +38,15 @@ import {
   VIDEO_ID_PATTERN,
   type VideoResult,
 } from "./ashyShared";
+import {
+  buildStudyPlan,
+  curateVideoResults,
+  extractPlanParams,
+  firstWeekItemIds,
+  isPlanningIntent,
+  isProgressIntent,
+  isPushback,
+} from "./ashyPlanning";
 
 /** Google's current recommendation for new projects (verified Oct 2026). */
 const DEFAULT_MODEL = "gemini-3.5-flash-lite";
@@ -106,10 +115,16 @@ type Result =
       searchQueries?: string[];
       /** Honest note about skipped/failed search, or a rate-limit notice. */
       searchNotice?: string;
+      /** Which limit produced the notice: the per-user cap or Gemini's 429. */
+      searchNoticeKind?: "userLimit" | "providerQuota" | "other";
       /** True when at least one grounding source came back. */
       grounded?: boolean;
       /** Google's Search-suggestions entry point (plain link, never HTML). */
       searchEntryPointUrl?: string;
+      /** Quick-reply chips (e.g. the planning clarifying questions). */
+      chips?: string[];
+      /** Real syllabus item ids of week 1 — powers "Add to Missions". */
+      planMissions?: { itemIds: string[]; labels: string[] };
     }
   | { ok: false; kind: FailureKind; message: string };
 
@@ -210,7 +225,21 @@ Web search:
 Resource curation (the student is a Bangladeshi HSC / BUET admission student):
 - Prefer: NCTB textbooks, official BUET/university/board websites, Khan Academy, OpenStax, MIT OpenCourseWare, LibreTexts, HyperPhysics, The Physics Classroom, Paul's Online Math Notes, and trusted educational YouTube channels. Avoid spammy, paywalled or outdated pages.
 - For "best resources" requests give a SHORT ranked list (3–5 items): what it is, why it fits, its type (video / notes / practice / book / official), and its level — then a 2–3 step study plan. Tailor it to the progress summary when relevant.
-- Use the video marker for YouTube lessons and web search for articles, notes and documents; give both when that helps.`;
+- Use the video marker for YouTube lessons and web search for articles, notes and documents; give both when that helps.
+
+Study plans (roadmaps, schedules, "what should I study", "can I finish in N months"):
+- When a STUDY PLAN block appears in this context, a deterministic planner computed it from the student's REAL syllabus. You EXPLAIN it — you never recompute, re-round, adjust or invent any number, chapter name, item number or date in it.
+- Copy every number exactly as given (weeks, items, percentages, hours). If the student asks for the full schedule and only a summary is in the context, say the summary covers the first weeks and offer the full plan as a follow-up — do not fabricate the remaining weeks.
+- Never invent syllabus chapter or item names. Use only the names present in the plan or progress data. If a name isn't available, say so.
+- Structure plan answers: (1) verdict + key numbers in 2–3 lines, (2) THIS WEEK in detail, (3) monthly milestones with projected %, (4) what to do if the student falls behind (catch-up rule: use the revision weeks or add the missed items to the next week's total), (5) one question or next action. Keep under ~400 words unless they ask for the full schedule.
+- If the student didn't state their available hours or deadline yet, ask at most 3 short questions in ONE message (hours on weekdays, hours on weekend days, exam/target date) and stop — don't generate a full plan from thin air.
+- Do NOT attach videos to plan, roadmap or progress answers. Only suggest a video for the single immediate next topic when asked, using a marker with that exact topic's name.
+
+Honesty and consistency (anti-flip-flop):
+- Never invent syllabus chapter or item names. Use only the names in the provided syllabus/plan data. If chapter names aren't available, say so.
+- When the student pushes back ("that's unrealistic", "are you mad"), do NOT just agree or apologize. Identify which assumption they're challenging (hours per day, items per week, minutes per item, the deadline), recompute mentally with THEIR corrected input, and show the new numbers. If their objection is right, change that assumption openly and say what changed. If the arithmetic still holds at their stated numbers, politely hold the position and show the math. Always keep the total consistent with the deadline. If the deadline can't be met at their stated hours, say so plainly and offer the computed options.
+- Be honest and direct, motivating but not flattering; no filler like "Fair point, you caught me" or "You're completely right" unless you actually changed the numbers because of them.
+- Don't contradict an earlier plan in the same conversation without saying what changed and why.`;
 
 export const chat = action({
   args: {
@@ -299,32 +328,156 @@ export const chat = action({
 
     // --- Phase 2: the student's own progress, server-side only ----------
     let progressSummary = "";
+    let callerProgress: {
+      profile: Record<string, unknown> | null;
+      completions: Record<string, number>;
+      stats: Record<string, unknown> | null;
+      updatedAt: number;
+    } | null = null;
     try {
-      const progress = await ctx.runQuery(
+      callerProgress = await ctx.runQuery(
         internal.ashyData.progressForCaller,
         {},
       );
-      progressSummary = buildProgressSummary(progress);
+      progressSummary = buildProgressSummary(callerProgress);
     } catch (error) {
       // The summary is a bonus — never fail a chat because of it.
       console.error(`[ashy] progress summary failed: ${sanitizeLog(error)}`);
     }
 
+    // --- Phase 5: deterministic study planning (no LLM math) ------------
+    const latestUserText = [...args.history]
+      .reverse()
+      .find((turn) => turn.role === "user")?.text ?? "";
+    const planningAsk = isPlanningIntent(latestUserText);
+    const wantsFullSchedule =
+      /\b(full|entire|whole|detailed|complete)\b[^.\n]{0,40}\b(plan|schedule|roadmap|week.?by.?week)\b|\bweek.?by.?week\b|\bevery\s+week\b/i.test(
+        latestUserText,
+      );
+    // A pushback counts as plan-related when any recent user turn planned.
+    const recentUserTurns = args.history
+      .filter((turn) => turn.role === "user")
+      .slice(-6)
+      .map((turn) => turn.text);
+    const planInConversation =
+      planningAsk || recentUserTurns.some((text) => isPlanningIntent(text));
+    const pushback = isPushback(latestUserText) && planInConversation;
+
+    // Merge stated inputs across the last few user turns (latest wins).
+    const stated = { weekdayHours: null, weekendHours: null, months: null } as {
+      weekdayHours: number | null;
+      weekendHours: number | null;
+      months: number | null;
+    };
+    for (const text of recentUserTurns) {
+      const parsed = extractPlanParams(text);
+      if (parsed.weekdayHours !== null) stated.weekdayHours = parsed.weekdayHours;
+      if (parsed.weekendHours !== null) stated.weekendHours = parsed.weekendHours;
+      if (parsed.months !== null) stated.months = parsed.months;
+    }
+    const wantsDefaults = /\b(use|with|go with|assume|default)\b[^.\n]{0,20}\bdefault|\bjust assume\b|\buse your judgment\b/i.test(
+      latestUserText,
+    );
+
+    let planContext: string | null = null;
+    let planMissions: { itemIds: string[]; labels: string[] } | undefined;
+    let planningChips: string[] | undefined;
+    let planningReply = false;
+
+    if (planningAsk || pushback) {
+      const haveHours =
+        stated.weekdayHours !== null || stated.weekendHours !== null;
+      const haveDeadline = stated.months !== null;
+
+      // Ask before computing unless everything essential is known (or the
+      // student explicitly asked for defaults): feasibility math needs BOTH
+      // the daily hours and the deadline to be real.
+      if ((!haveHours || !haveDeadline) && !wantsDefaults) {
+        // C2: at most 3 short questions in ONE message, with quick replies.
+        return {
+          ok: true,
+          text: [
+            "Before I build the plan I need three quick numbers — it's computed from your real syllabus, so the math has to be right:",
+            "",
+            "1. How many hours can you study on a **weekday**?",
+            "2. How many hours on **weekend days**?",
+            "3. When is your exam, or how many **months** do you have?",
+            "",
+            "You can answer all three in one line, e.g. *\"2 hours weekdays, 4 hours weekends, exam in 7 months\"*.",
+          ].join("\n"),
+          chips: [
+            "2 hours weekdays, 4 hours weekends, exam in 7 months",
+            "1 hour a day, finish in 12 months",
+            "Use your defaults and give me a provisional plan",
+          ],
+          searchNotice: undefined,
+        };
+      }
+
+      try {
+        const built = buildStudyPlan(callerProgress, {
+          months: stated.months,
+          weekdayHours: stated.weekdayHours,
+          weekendHours: stated.weekendHours,
+          fullSchedule: wantsFullSchedule,
+        });
+        if (built) {
+          planContext = built.text;
+          planningReply = true;
+          // Week 1 targets for the optional one-click "Add to Missions".
+          const ids = firstWeekItemIds(built.plan);
+          const week1 = built.plan.studySchedule[0];
+          if (ids.length > 0 && week1) {
+            // Human labels: one per block, expanded per item so the student
+            // sees exactly what would be created.
+            const labels: string[] = [];
+            const idSet = new Set(ids);
+            for (const block of week1.blocks) {
+              for (const itemId of block.itemIds) {
+                if (!idSet.has(itemId)) continue;
+                labels.push(
+                  `${block.subjectName} ${block.paper} · ${block.chapterLabel} · ${itemId.split(".").pop() ?? itemId}`,
+                );
+              }
+            }
+            planMissions = { itemIds: ids, labels: labels.slice(0, 20) };
+          }
+          if (pushback) {
+            planContext +=
+              "\n\nThe student pushed back on the previous plan. Identify WHICH assumption they are challenging (hours per day, items per week, minutes per item, deadline), recompute nothing — the numbers above already reflect their latest stated inputs — and show how the math works at those inputs. If their objection is valid at their own numbers, say what changed plainly.";
+          }
+          if (!haveHours || !haveDeadline) {
+            planContext +=
+              "\nNote: some inputs were NOT stated by the student, so labeled defaults were used. Point out exactly which assumptions were assumed (see the assumption notes) so they can correct them.";
+          }
+        }
+      } catch (error) {
+        console.error(`[ashy] planner failed: ${sanitizeLog(error)}`);
+      }
+    }
+
     // --- Phase 4: search decision + per-user daily cap -------------------
     let grounding = searchMode !== "off";
     let searchNotice: string | undefined;
+    let searchNoticeKind: "userLimit" | "providerQuota" | "other" | undefined;
+    // C5: planning, schedules and progress questions never need the web.
+    if (grounding && (planningReply || isProgressIntent(latestUserText))) {
+      grounding = false;
+    }
     if (grounding && hasImage) {
       // Google Search grounding is not reliably combinable with inline image
       // input, so photos take priority and the student is told plainly.
       grounding = false;
       searchNotice =
         "Web search was skipped for this question because photos can't be combined with the search tool — this answer is from Ashy's own knowledge.";
+      searchNoticeKind = "other";
     }
     const searchDay = dayKeyNow();
     if (grounding && Date.now() < groundingPausedUntil) {
       grounding = false;
       searchNotice =
-        "Web search is temporarily paused after hitting its quota, so this answer is from Ashy's own knowledge and may be outdated.";
+        "Web search is paused for now after Google's own search quota rejected a request (HTTP 429), so this answer is from Ashy's knowledge and may be outdated.";
+      searchNoticeKind = "providerQuota";
     }
     if (grounding) {
       try {
@@ -334,7 +487,8 @@ export const chat = action({
         );
         if (usage && usage.count >= GROUNDED_SEARCH_DAILY_LIMIT) {
           grounding = false;
-          searchNotice = `You've used today's ${GROUNDED_SEARCH_DAILY_LIMIT} web-searched answers, so this answer is from Ashy's own knowledge and may be outdated.`;
+          searchNotice = `You've used today's ${GROUNDED_SEARCH_DAILY_LIMIT} web-searched answers (the app's per-user daily limit), so this answer is from Ashy's own knowledge and may be outdated.`;
+          searchNoticeKind = "userLimit";
         }
       } catch (error) {
         console.error(`[ashy] search quota check failed: ${sanitizeLog(error)}`);
@@ -353,6 +507,11 @@ export const chat = action({
     // --- Assemble the request --------------------------------------------
     const systemParts = [SYSTEM_PROMPT];
     if (progressSummary) systemParts.push(progressSummary);
+    if (planContext) {
+      systemParts.push(
+        `${planContext}\n\nRules for this reply — breaking any of these ruins the product:\n1. Copy the KEY NUMBERS line verbatim. Never re-derive weekly hours, totals or percentages yourself — if a number is not in the plan above, do not state it.\n2. Same chapter and item names, same order, same ranges as the plan above. Never invent or rename a chapter or item.\n3. Follow the answer structure from the system prompt (verdict → this week → milestones → catch-up rule → one next action).\n4. Keep it under ~400 words. Do not attach videos.\n5. End by offering "Show full week-by-week plan" if the full schedule was not shown.`,
+      );
+    }
     const context = args.context?.trim().slice(0, 600);
     if (context) {
       systemParts.push(
@@ -370,7 +529,9 @@ export const chat = action({
         parts: [{ text: systemParts.join("\n\n") }],
       },
       contents: cleanContents,
-      generationConfig: { temperature: 0.6 },
+      // Plan replies must stick to the given numbers; a lower temperature
+      // makes re-rounding or improvising far less likely.
+      generationConfig: { temperature: planContext ? 0.2 : 0.6 },
     };
     if (grounding) body.tools = [{ google_search: {} }];
 
@@ -439,7 +600,10 @@ export const chat = action({
       delete body.tools;
       groundedRequest = false;
       searchNotice =
-        "I couldn't search the web right now, so this answer is from my own knowledge and may be outdated.";
+        call.status === 429
+          ? "Google's own search quota rejected this request (HTTP 429), so this answer is from my own knowledge and may be outdated."
+          : "I couldn't search the web right now, so this answer is from my own knowledge and may be outdated.";
+      searchNoticeKind = call.status === 429 ? "providerQuota" : "other";
       call = await callGemini();
     }
     if (!call.ok) return fail(kindForStatus(call.status));
@@ -459,20 +623,22 @@ export const chat = action({
 
     // --- Phase 3: turn [[video: "…"]] markers into real results ------------
     const { clean, queries } = extractVideoQueries(rawText);
+    // C4: never attach videos to plan/progress answers — strip any markers.
+    const effectiveQueries = planningReply ? [] : queries;
     const videos: VideoResult[] = [];
     let videoSearch: VideoSearchFailure | undefined;
-    if (queries.length > 0) {
+    if (effectiveQueries.length > 0) {
       const ytKey = process.env.YOUTUBE_API_KEY?.trim();
       if (!ytKey) {
         // Friendly "not configured" — never fabricate a video.
         videoSearch = {
-          query: queries[0],
+          query: effectiveQueries[0],
           ok: false,
           message:
             "Video search isn't configured on this deployment yet. You can search YouTube directly instead.",
         };
       } else {
-        for (const query of queries) {
+        for (const query of effectiveQueries) {
           const result = await searchYouTube(ctx, query, ytKey);
           if (result.videos && result.videos.length > 0) {
             videos.push(...result.videos);
@@ -489,9 +655,9 @@ export const chat = action({
             break;
           }
         }
-        if (videos.length === 0 && !videoSearch && queries.length > 0) {
+        if (videos.length === 0 && !videoSearch && effectiveQueries.length > 0) {
           videoSearch = {
-            query: queries[0],
+            query: effectiveQueries[0],
             ok: false,
             message:
               "No videos matched that search. Try rephrasing the topic, or search YouTube directly.",
@@ -510,6 +676,9 @@ export const chat = action({
       if (sources.length > 0) result.sources = sources;
       if (searchQueries.length > 0) result.searchQueries = searchQueries;
       if (searchNotice) result.searchNotice = searchNotice;
+      if (searchNoticeKind) result.searchNoticeKind = searchNoticeKind;
+      if (planningChips) result.chips = planningChips;
+      if (planMissions) result.planMissions = planMissions;
       if (grounded) result.grounded = true;
       if (searchEntryPointUrl) result.searchEntryPointUrl = searchEntryPointUrl;
     }
@@ -524,12 +693,19 @@ export const chat = action({
     ): Promise<{ videos: VideoResult[] | null; message?: string }> {
       const normalized = query.toLowerCase().replace(/\s+/g, " ").trim();
       const cacheKey = `yt:${normalized}`;
+      // C4: the student asked for a "short clip" explicitly → short videos OK.
+      const allowShort = /\bshort\s+(clip|video)\b/i.test(latestUserText);
       try {
         const cached = await actionCtx.runQuery(
           internal.ashyData.getCachedVideoSearch,
           { key: cacheKey },
         );
-        if (cached && cached.length > 0) return { videos: cached };
+        if (cached && cached.length > 0) {
+          const curatedCached = curateVideoResults(cached, query, { allowShort });
+          if (curatedCached.length > 0) return { videos: curatedCached };
+          // Cache held only junk for this query — fall through to a live
+          // search rather than showing nothing.
+        }
       } catch {
         // A cache hiccup must never block a live search.
       }
@@ -559,7 +735,7 @@ export const chat = action({
 
       const searchUrl =
         `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video` +
-        `&videoEmbeddable=true&safeSearch=moderate&maxResults=5` +
+        `&videoEmbeddable=true&safeSearch=moderate&maxResults=15` +
         `&q=${encodeURIComponent(normalized)}&key=${ytKey}`;
       const searchPayload = (await callApi(searchUrl)) as
         | { items?: Array<{ id?: { videoId?: string }; snippet?: { title?: string; channelTitle?: string } }> }
@@ -575,7 +751,7 @@ export const chat = action({
       const ids = (searchPayload.items ?? [])
         .map((item) => item.id?.videoId ?? "")
         .filter((id) => VIDEO_ID_PATTERN.test(id))
-        .slice(0, 10);
+        .slice(0, 15);
       if (ids.length === 0) return { videos: [] };
 
       const videosUrl =
@@ -612,15 +788,22 @@ export const chat = action({
         };
       }
 
+      // C4: curate BEFORE caching/returning — Shorts, memes, clickbait and
+      // off-topic results never reach the student. If nothing passes the
+      // filter, return an empty list so the caller shows the plain
+      // "Search on YouTube" link instead of junk.
+      const curated = curateVideoResults(results, query, { allowShort });
+      if (curated.length === 0) return { videos: [] };
+
       try {
         await actionCtx.runMutation(internal.ashyData.saveVideoSearch, {
           key: cacheKey,
-          results,
+          results: curated,
         });
       } catch {
         // Cache write failures are invisible to the student.
       }
-      return { videos: results };
+      return { videos: curated };
     }
   },
 });

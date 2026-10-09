@@ -59,6 +59,13 @@ export interface ScheduleBlock {
   /** e.g. "items 1.14–1.20" or "item 3.2" (real item numbers from the DB). */
   itemRange: string;
   itemCount: number;
+  /** Real syllabus item ids in this block (for one-click mission creation). */
+  itemIds: string[];
+}
+
+/** Every item id scheduled in a study week, in order. */
+export function weekItemIds(week: StudyWeek): string[] {
+  return week.blocks.flatMap((b) => b.itemIds);
 }
 
 export interface StudyWeek {
@@ -118,6 +125,8 @@ export interface PlannerResult {
   studyDaysPerWeek: number;
   minutesPerWeekday: number;
   minutesPerWeekendDay: number;
+  /** Total study minutes available per week (after rest days). */
+  minutesPerWeek: number;
   itemsPerWeek: number;
   itemsPerDay: number;
 
@@ -378,7 +387,9 @@ export function computePlan(input: PlannerInput): PlannerResult {
 
   for (let w = 0; w < studyWeeks && assigned < remainingItems; w += 1) {
     const cumulativeTarget = Math.round((remainingItems * (w + 1)) / studyWeeks);
-    const weekItems = Math.min(remainingItems - assigned, cumulativeTarget - assigned);
+    // Attempt this many items; the week records what was actually taken so
+    // the schedule always reconciles with the remaining count.
+    const attempt = Math.min(remainingItems - assigned, cumulativeTarget - assigned);
     const weekStart = startDate + w * WEEK_MS;
 
     // Pick up to `parallel` subjects that still have items, rotating.
@@ -392,10 +403,20 @@ export function computePlan(input: PlannerInput): PlannerResult {
     cursor = (cursor + parallel) % Math.max(1, subjectOrder.length);
 
     // Split the week's quota as evenly as possible across active subjects.
-    const perSubject = Math.floor(weekItems / Math.max(1, active.length));
-    let leftover = weekItems - perSubject * active.length;
+    const perSubject = Math.floor(attempt / Math.max(1, active.length));
+    let leftover = attempt - perSubject * active.length;
 
-    const blocks: ScheduleBlock[] = [];
+    interface MutableBlock {
+      subjectName: string;
+      paper: string;
+      chapterLabel: string;
+      firstNumber: string;
+      lastNumber: string;
+      count: number;
+      itemIds: string[];
+    }
+    const mutableBlocks: MutableBlock[] = [];
+
     for (const subject of active) {
       if (assigned >= remainingItems) break;
       const take = perSubject + (leftover > 0 ? 1 : 0);
@@ -406,36 +427,52 @@ export function computePlan(input: PlannerInput): PlannerResult {
       assigned += taken.length;
 
       // Merge consecutive items of the same chapter into one block.
-      let block: ScheduleBlock | null = null;
+      let block: MutableBlock | null = null;
       for (const f of taken) {
-        const sameChapter =
+        if (
           block &&
           block.subjectName === f.subject.name &&
-          block.chapterLabel === chapterLabel(f.chapter);
-        if (sameChapter && block) {
-          const lastNumber = block.itemRange.split("–").pop() ?? "";
-          block.itemRange = `items ${lastNumber.trim()}–${f.item.itemNumber}`;
-          block.itemCount += 1;
+          block.chapterLabel === chapterLabel(f.chapter)
+        ) {
+          block.lastNumber = f.item.itemNumber;
+          block.count += 1;
+          block.itemIds.push(f.item.id);
         } else {
           block = {
             subjectName: f.subject.name,
             paper: f.subject.paper,
             chapterLabel: chapterLabel(f.chapter),
-            itemRange: taken.length === 1 && taken[0] === f
-              ? `item ${itemLabel(f.item)}`
-              : `items ${f.item.itemNumber}`,
-            itemCount: 1,
+            firstNumber: f.item.itemNumber,
+            lastNumber: f.item.itemNumber,
+            count: 1,
+            itemIds: [f.item.id],
           };
-          blocks.push(block);
+          mutableBlocks.push(block);
         }
       }
     }
 
+    // `itemRange` uses only real item numbers. A single item reads
+    // "item 1.14"; a run reads "items 1.14 → 1.20" (the arrow keeps Biology's
+    // page-range labels like "31–40" unambiguous).
+    const blocks: ScheduleBlock[] = mutableBlocks.map((b) => ({
+      subjectName: b.subjectName,
+      paper: b.paper,
+      chapterLabel: b.chapterLabel,
+      itemRange:
+        b.count === 1
+          ? `item ${b.firstNumber}`
+          : `items ${b.firstNumber} → ${b.lastNumber}`,
+      itemCount: b.count,
+      itemIds: b.itemIds,
+    }));
+
+    const actual = blocks.reduce((sum, b) => sum + b.itemCount, 0);
     weeks.push({
       week: w + 1,
       startDate: dateKey(weekStart),
-      items: weekItems,
-      minutes: weekItems * minutesPerItem,
+      items: actual,
+      minutes: actual * minutesPerItem,
       blocks,
       projectedPercent:
         totalItems === 0 ? 100 : Math.round(((completedItems + assigned) / totalItems) * 100),
@@ -443,11 +480,12 @@ export function computePlan(input: PlannerInput): PlannerResult {
     });
   }
 
-  // Any remainder (shouldn't happen, but the arithmetic must reconcile) goes
-  // into the final study week.
+  // Any remainder (e.g. rounding across the final weeks) goes into the last
+  // study week so the schedule always sums to exactly the remaining items.
   if (assigned < remainingItems && weeks.length > 0) {
     const last = weeks[weeks.length - 1];
     last.items += remainingItems - assigned;
+    last.minutes += (remainingItems - assigned) * minutesPerItem;
     last.projectedPercent =
       totalItems === 0 ? 100 : Math.round(((completedItems + remainingItems) / totalItems) * 100);
     assigned = remainingItems;
@@ -532,6 +570,7 @@ export function computePlan(input: PlannerInput): PlannerResult {
     studyDaysPerWeek,
     minutesPerWeekday: weekdayMinutes,
     minutesPerWeekendDay: weekendMinutes,
+    minutesPerWeek: minutesPerWeek,
     itemsPerWeek: studyWeeks > 0 ? Math.round((remainingItems / studyWeeks) * 10) / 10 : 0,
     itemsPerDay:
       studyWeeks > 0 && studyDaysPerWeek > 0

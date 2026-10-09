@@ -11,6 +11,7 @@
 import type * as admin from "../admin.js";
 import type * as ashy from "../ashy.js";
 import type * as ashyData from "../ashyData.js";
+import type * as ashyPlanning from "../ashyPlanning.js";
 import type * as ashyShared from "../ashyShared.js";
 import type * as auth from "../auth.js";
 import type * as auth_emailOtp from "../auth/emailOtp.js";
@@ -29,6 +30,7 @@ declare const fullApi: ApiFromModules<{
   admin: typeof admin;
   ashy: typeof ashy;
   ashyData: typeof ashyData;
+  ashyPlanning: typeof ashyPlanning;
   ashyShared: typeof ashyShared;
   auth: typeof auth;
   "auth/emailOtp": typeof auth_emailOtp;

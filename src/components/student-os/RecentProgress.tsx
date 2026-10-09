@@ -49,7 +49,7 @@ export function RecentProgress({
                     >
                       <Check className="size-3.5" />
                     </span>
-                    <span className="truncate text-sm">
+                    <span className="text-sm break-words">
                       {formatCompletionText(entry)}
                     </span>
                   </div>

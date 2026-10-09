@@ -41,6 +41,12 @@ export interface AshyMessage {
   grounded?: boolean;
   /** Google's Search-suggestions entry point (a plain link). */
   searchEntryPointUrl?: string;
+  /** Quick-reply chips (e.g. the planning clarifying questions). */
+  chips?: string[];
+  /** Real syllabus item ids/labels of week 1 — "Add to Missions" button. */
+  planMissions?: { itemIds: string[]; labels: string[] };
+  /** Which limit produced the notice: the app's per-user cap or Gemini's 429. */
+  searchNoticeKind?: "userLimit" | "providerQuota" | "other";
 }
 
 /** One real, backend-searched YouTube video. */
