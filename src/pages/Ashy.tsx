@@ -185,10 +185,10 @@ export default function AshyPage() {
   const [cameraOpen, setCameraOpen] = useState(false);
   /** Web-search preference for each message (Phase 4 toggle chip). */
   const [searchMode, setSearchMode] = useState<"auto" | "on" | "off">("auto");
-  /** In-app video player: modal, or minimized above the composer. */
+  /** In-app video player: null = closed, "full" sheet, or "mini" dock. */
   const [player, setPlayer] = useState<{
     video: AshyVideo;
-    mode: "dialog" | "mini";
+    mode: "full" | "mini";
   } | null>(null);
   const [listening, setListening] = useState(false);
   const [speakingId, setSpeakingId] = useState<string | null>(null);
@@ -543,7 +543,14 @@ export default function AshyPage() {
     messages[messages.length - 1].role === "assistant";
 
   return (
-    <div className="mx-auto flex h-[calc(100dvh-14rem)] min-h-[26rem] w-full max-w-3xl flex-col lg:h-[calc(100dvh-9rem)]">
+    <div
+      className={cn(
+        "mx-auto flex h-[calc(100dvh-14rem)] min-h-[26rem] w-full max-w-3xl flex-col lg:h-[calc(100dvh-9rem)]",
+        // The mini-player docks bottom-right; reserve space so it never
+        // covers the composer's input or send button.
+        player?.mode === "mini" && "pb-[112px] xl:pb-0",
+      )}
+    >
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-3">
         <div className="flex min-w-0 items-center gap-2.5">
@@ -726,7 +733,7 @@ export default function AshyPage() {
                                 key={video.videoId}
                                 video={video}
                                 onPlay={(picked) =>
-                                  setPlayer({ video: picked, mode: "dialog" })
+                                  setPlayer({ video: picked, mode: "full" })
                                 }
                               />
                             ))}
@@ -878,23 +885,6 @@ export default function AshyPage() {
           >
             <X className="size-4" aria-hidden />
           </Button>
-        </div>
-      ) : null}
-
-      {/* Minimized video player — deliberately above the composer so it never
-          covers it on mobile. */}
-      {player?.mode === "mini" ? (
-        <div className="mb-2 flex justify-end">
-          <AshyVideoPlayer
-            video={player.video}
-            mode="mini"
-            onRestore={() =>
-              setPlayer((current) =>
-                current ? { ...current, mode: "dialog" } : current,
-              )
-            }
-            onClose={() => setPlayer(null)}
-          />
         </div>
       ) : null}
 
@@ -1129,13 +1119,22 @@ export default function AshyPage() {
         }}
       />
 
-      {player?.mode === "dialog" ? (
+      {/* ONE player instance for both modes (it portals itself to body, so
+          the iframe moves between full and mini without being recreated).
+          While minimized it docks bottom-right above the tab bar, so the
+          chat column reserves space and the composer is never covered. */}
+      {player ? (
         <AshyVideoPlayer
           video={player.video}
-          mode="dialog"
+          mode={player.mode}
           onMinimize={() =>
             setPlayer((current) =>
               current ? { ...current, mode: "mini" } : current,
+            )
+          }
+          onRestore={() =>
+            setPlayer((current) =>
+              current ? { ...current, mode: "full" } : current,
             )
           }
           onClose={() => setPlayer(null)}

@@ -1,10 +1,14 @@
 /**
- * Daily Guidance (🌙) — one verse a day in a single line.
+ * Daily Guidance (🌙) — one verse a day, shown in full.
  *
  * Deliberately tiny: it is a quiet moment between the greeting and the
  * work, not a content section. Deterministic per date, so a refresh never
  * reshuffles it, and a content failure shows a small retry instead of
  * blanking the Dashboard.
+ *
+ * Layout: the label sits on top on phones, with the complete verse below it
+ * (wrapping, never clamped) and the reference as a small muted line. On
+ * desktop the label and text share a row when the text fits.
  *
  * No XP, no streak, no points — listening to the Quran stays outside the
  * gamification system, and playback only ever starts from the player button.
@@ -48,7 +52,7 @@ export function DailyGuidance() {
   return (
     <section
       aria-labelledby="daily-guidance-heading"
-      className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border bg-card px-4 py-3"
+      className="flex flex-col gap-2 rounded-xl border bg-card px-4 py-3 sm:flex-row sm:items-start sm:gap-4"
     >
       <h2
         id="daily-guidance-heading"
@@ -60,7 +64,7 @@ export function DailyGuidance() {
         Daily Guidance
       </h2>
 
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 basis-80">
         {!settled ? (
           <Skeleton className="h-4 w-2/3" />
         ) : error ? (
@@ -77,12 +81,15 @@ export function DailyGuidance() {
             </Button>
           </span>
         ) : entry ? (
-          <p className="line-clamp-2 text-sm break-words text-foreground">
-            “{entry.english}”{" "}
-            <span className="text-muted-foreground">
-              — Quran {entry.surah}:{entry.ayah}
-            </span>
-          </p>
+          // The full message, wrapping — never truncated mid-sentence.
+          <>
+            <p className="text-sm break-words text-foreground">
+              &ldquo;{entry.english}&rdquo;
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Quran {entry.surah}:{entry.ayah}
+            </p>
+          </>
         ) : null}
       </div>
     </section>

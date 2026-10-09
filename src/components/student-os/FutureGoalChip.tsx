@@ -50,7 +50,9 @@ export function FutureGoalChip() {
 
         <span className="min-w-0 flex-1 basis-40">
           {goalDraft ? (
-            <span className="block truncate">
+            // Full goal text, wrapping — the chip is width-bounded by the
+            // page, so nothing can push past the viewport.
+            <span className="block break-words">
               “{goalDraft}”
               {targetDraft ? ` · ${targetDraft}` : null}
             </span>
