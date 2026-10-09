@@ -6,7 +6,12 @@
  * only holds pure helpers shared by the page and its components.
  */
 
-export type AshyFailureKind = "unauthorized" | "quota" | "unavailable" | "blocked";
+export type AshyFailureKind =
+  | "unauthorized"
+  | "quota"
+  | "unavailable"
+  | "blocked"
+  | "invalidImage";
 
 export interface AshyImage {
   /** MIME type: image/png, image/jpeg, image/webp, image/gif. */
@@ -43,6 +48,8 @@ export const ASHY_FAILURE_COPY: Record<AshyFailureKind, string> = {
   quota: "Ashy has reached its current usage limit. Please try again later.",
   unavailable: "Ashy is temporarily unavailable. Please try again in a moment.",
   blocked: "Ashy couldn't answer that. Try rephrasing your question a little.",
+  invalidImage:
+    "That image couldn't be read. Please attach it again as a PNG, JPEG or WebP and retry.",
 };
 
 export function newId(): string {

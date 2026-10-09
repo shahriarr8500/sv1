@@ -35,7 +35,12 @@ const ALLOWED_IMAGE_TYPES = [
   "image/gif",
 ];
 
-type FailureKind = "unauthorized" | "quota" | "unavailable" | "blocked";
+type FailureKind =
+  | "unauthorized"
+  | "quota"
+  | "unavailable"
+  | "blocked"
+  | "invalidImage";
 
 const FAILURE_MESSAGES: Record<FailureKind, string> = {
   unauthorized: "Ashy is only available to signed-in students.",
@@ -43,6 +48,8 @@ const FAILURE_MESSAGES: Record<FailureKind, string> = {
   unavailable: "Ashy is temporarily unavailable. Please try again in a moment.",
   blocked:
     "Ashy couldn't answer that. Try rephrasing your question a little.",
+  invalidImage:
+    "That image couldn't be read. Please attach it again as a PNG, JPEG or WebP and retry.",
 };
 
 type Result =
@@ -106,13 +113,52 @@ Formatting:
 - Use chemical formulas with normal subscripts in LaTeX, e.g. $\\text{H}_2\\text{O}$, and code blocks for code.
 - Never fabricate data, marks, dates or syllabus structure.
 
-You help with Mathematics, Physics, Chemistry, Biology, ICT, English and general academic questions.`;
+You help with Mathematics, Physics, Chemistry, Biology, ICT, English and general academic questions.
+
+Images:
+- When a student sends a photo of a question, work from what is actually visible in the image.
+- If the image is blurry, too small, or the question is cut off, ask the student to upload a clearer crop instead of guessing.
+- Never invent numbers, text, diagrams or syllabus details you cannot read clearly.
+- Keep answering follow-up questions about an image already in the conversation as if it were still in front of you.`;
 
 /** Maps an HTTP status from Gemini onto a friendly failure. */
 function kindForStatus(status: number): FailureKind {
   if (status === 429) return "quota";
   if (status === 401 || status === 403) return "unavailable";
   return "unavailable";
+}
+
+/**
+ * Identifies an image from the magic bytes of its base64 payload, so the
+ * backend never has to trust the MIME type the client claims. Returns the
+ * image's MIME type, or null when the bytes are not a recognizable image.
+ */
+function detectImageMime(base64: string): string | null {
+  const head = Buffer.from(base64.slice(0, 32), "base64");
+  if (head.length < 12) return null;
+  // PNG signature: 89 50 4E 47 0D 0A 1A 0A
+  if (
+    head[0] === 0x89 &&
+    head[1] === 0x50 &&
+    head[2] === 0x4e &&
+    head[3] === 0x47
+  ) {
+    return "image/png";
+  }
+  // JPEG: FF D8 FF
+  if (head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff) {
+    return "image/jpeg";
+  }
+  // GIF87a / GIF89a
+  if (head.toString("latin1", 0, 4).startsWith("GIF8")) return "image/gif";
+  // WEBP: "RIFF" .... "WEBP"
+  if (
+    head.toString("latin1", 0, 4) === "RIFF" &&
+    head.toString("latin1", 8, 12) === "WEBP"
+  ) {
+    return "image/webp";
+  }
+  return null;
 }
 
 export const chat = action({
@@ -143,33 +189,44 @@ export const chat = action({
     }
 
     let imagesLeft = MAX_IMAGES_TOTAL;
-    const contents = args.history.map((turn) => {
+    // Walk newest → oldest so the image the student just attached can never be
+    // the one that gets dropped: the multimodal budget is spent on recent
+    // turns first, and only older images are trimmed from context when it runs
+    // out. An image we cannot identify from its bytes fails the request loudly
+    // instead of being silently ignored.
+    const contents: Array<
+      { role: "user" | "model"; parts: Array<Record<string, unknown>> } | null
+    > = new Array(args.history.length).fill(null);
+
+    for (let i = args.history.length - 1; i >= 0; i -= 1) {
+      const turn = args.history[i];
       const parts: Array<Record<string, unknown>> = [];
       const text = turn.text.slice(0, MAX_TEXT_CHARS).trim();
       if (text) parts.push({ text });
 
       for (const image of turn.images ?? []) {
-        if (imagesLeft <= 0) break;
-        if (
-          !ALLOWED_IMAGE_TYPES.includes(image.mimeType) ||
-          image.data.length === 0 ||
-          image.data.length > MAX_IMAGE_CHARS
-        ) {
-          return null; // whole turn rejected below
+        if (image.data.length === 0 || image.data.length > MAX_IMAGE_CHARS) {
+          return fail("invalidImage");
         }
+        // MIME type comes from the bytes themselves, never from the client.
+        const mime = detectImageMime(image.data);
+        if (!mime || !ALLOWED_IMAGE_TYPES.includes(mime)) {
+          return fail("invalidImage");
+        }
+        if (imagesLeft <= 0) continue; // older image — trimmed from context
         imagesLeft -= 1;
         parts.push({
-          inline_data: { mime_type: image.mimeType, data: image.data },
+          inline_data: { mime_type: mime, data: image.data },
         });
       }
 
-      if (parts.length === 0) return null;
-      return { role: turn.role, parts };
-    });
+      // A turn left with nothing (an image-only turn past the budget) is
+      // dropped from the payload rather than failing the whole conversation.
+      if (parts.length > 0) contents[i] = { role: turn.role, parts };
+    }
 
-    if (contents.some((entry) => entry === null)) return fail("unavailable");
     const cleanContents = contents.filter(
-      (entry): entry is NonNullable<typeof entry> => entry !== null,
+      (entry): entry is NonNullable<(typeof contents)[number]> => entry !== null,
     );
     if (cleanContents.length === 0) return fail("unavailable");
 

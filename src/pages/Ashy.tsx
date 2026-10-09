@@ -17,7 +17,9 @@ import {
   ArrowUp,
   Check,
   Copy,
+  Crop,
   History,
+  ImagePlus,
   Mic,
   Paperclip,
   Plus,
@@ -159,6 +161,8 @@ export default function AshyPage() {
   const [listening, setListening] = useState(false);
   const [speakingId, setSpeakingId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  /** Toggles the pending-attachment thumbnail between compact and enlarged. */
+  const [previewLarge, setPreviewLarge] = useState(false);
 
   const chatAction = useAction(api.ashy.chat);
   const requestIdRef = useRef(0);
@@ -258,7 +262,12 @@ export default function AshyPage() {
     const image = pendingImage
       ? { mimeType: "image/jpeg", data: stripDataUrlPrefix(pendingImage) }
       : null;
-    if (!text && !image) return;
+    if (!text && !image) {
+      toast("Nothing to send yet", {
+        description: "Type a question or attach an image first.",
+      });
+      return;
+    }
 
     const conversationId = activeId;
     const userMessage: AshyMessage = {
@@ -284,6 +293,7 @@ export default function AshyPage() {
     );
     setDraft("");
     setPendingImage(null);
+    setPreviewLarge(false);
     if (textareaRef.current) textareaRef.current.style.height = "auto";
 
     const historyForRequest = [...messages, userMessage];
@@ -314,11 +324,24 @@ export default function AshyPage() {
 
   /* --- image attach + crop ---------------------------------------------- */
 
+  /**
+   * Opens the device image picker. The input's value is cleared first so that
+   * re-picking the same file (or cancelling and retrying) always fires a
+   * `change` event. Nothing ever opens the picker on its own.
+   */
+  const openFilePicker = useCallback(() => {
+    const input = fileInputRef.current;
+    if (!input) return;
+    input.value = "";
+    input.click();
+  }, []);
+
   const handleFile = useCallback(async (file: File | undefined) => {
-    if (!file) return;
+    if (!file) return; // student cancelled the picker — nothing to do
     if (!isAcceptedImage(file)) {
       toast("Unsupported image", {
-        description: "Please use a PNG, JPEG, or WebP image.",
+        description:
+          "Please use a PNG, JPEG, or WebP image. HEIC/HEIF isn't supported by this browser's image tools.",
       });
       return;
     }
@@ -330,6 +353,7 @@ export default function AshyPage() {
     }
     try {
       const dataUrl = await readImageFile(file);
+      setPreviewLarge(false);
       setCropSrc(dataUrl);
       setCropOpen(true);
     } catch {
@@ -535,8 +559,8 @@ export default function AshyPage() {
                             <img
                               key={`${message.id}-${imageIndex}`}
                               src={`data:${image.mimeType};base64,${image.data}`}
-                              alt="Attached image"
-                              className="max-h-48 rounded-lg border object-contain"
+                              alt="Image sent to Ashy"
+                              className="max-h-48 max-w-full rounded-lg border object-contain"
                             />
                           ))}
                         </div>
@@ -643,17 +667,35 @@ export default function AshyPage() {
 
       {/* Pending attachment preview */}
       {pendingImage ? (
-        <div className="mb-2 flex items-center gap-3 rounded-xl border bg-card p-2.5">
-          <img
-            src={pendingImage}
-            alt="Attachment to send"
-            className="h-16 rounded-lg border object-contain"
-          />
-          <div className="flex flex-1 flex-wrap items-center gap-2">
-            <p className="text-xs text-muted-foreground">
-              Ready to send — only this crop goes to Ashy.
+        <div className="mb-2 flex items-center gap-2 rounded-xl border bg-card p-2.5">
+          <button
+            type="button"
+            className="shrink-0 cursor-zoom-in rounded-lg focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            aria-label={previewLarge ? "Hide larger preview" : "Preview image"}
+            title="Preview image"
+            onClick={() => setPreviewLarge((current) => !current)}
+          >
+            <img
+              src={pendingImage}
+              alt="Cropped image ready to send"
+              className={cn(
+                "rounded-lg border object-contain transition-all",
+                previewLarge
+                  ? "max-h-56 w-auto max-w-[min(100%,22rem)]"
+                  : "h-16 w-auto max-w-32",
+              )}
+            />
+          </button>
+
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-semibold text-foreground">
+              Ready to send
+            </p>
+            <p className="truncate text-xs text-muted-foreground">
+              Only this crop goes to Ashy.
             </p>
           </div>
+
           <Button
             variant="outline"
             size="sm"
@@ -663,14 +705,29 @@ export default function AshyPage() {
               setCropOpen(true);
             }}
           >
-            Crop
+            <Crop className="size-3.5" aria-hidden />
+            Crop image
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 cursor-pointer text-xs"
+            onClick={openFilePicker}
+            disabled={busy}
+          >
+            <ImagePlus className="size-3.5" aria-hidden />
+            Replace
           </Button>
           <Button
             variant="ghost"
             size="sm"
             className="h-8 cursor-pointer px-2 text-xs"
-            aria-label="Remove attachment"
-            onClick={() => setPendingImage(null)}
+            aria-label="Remove image"
+            title="Remove image"
+            onClick={() => {
+              setPendingImage(null);
+              setPreviewLarge(false);
+            }}
           >
             <X className="size-4" aria-hidden />
           </Button>
@@ -699,11 +756,11 @@ export default function AshyPage() {
           type="button"
           variant="ghost"
           size="icon"
-          aria-label="Attach an image"
-          title="Attach an image"
+          aria-label="Choose image"
+          title="Choose image"
           className="shrink-0 text-muted-foreground"
           disabled={busy}
-          onClick={() => fileInputRef.current?.click()}
+          onClick={openFilePicker}
         >
           <Paperclip className="size-4" aria-hidden />
         </Button>
@@ -773,8 +830,8 @@ export default function AshyPage() {
           <Button
             type="submit"
             size="icon"
-            aria-label="Send message"
-            title="Send"
+            aria-label="Send to Ashy"
+            title="Send to Ashy"
             className="shrink-0"
             disabled={!draft.trim() && !pendingImage}
           >
