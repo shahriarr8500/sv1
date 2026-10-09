@@ -56,13 +56,75 @@ export function isPlanningIntent(text: string): boolean {
 function clampNumber(n: number, min: number, max: number): number | null {
   if (!Number.isFinite(n) || n <= 0 || n > max) return null;
   return Math.round(n * 10) / 10;
-}
-
-/**
+}/**
  * Parses planning inputs the student stated in free text: study hours on
  * weekdays and weekends, plus a deadline in months ("7 months", "12 weeks").
  * Every field is optional — the caller decides what still needs asking.
+ *
+ * Hours are found by anchoring a number to a marker word ("weekends 4h",
+ * "4 hours on weekdays"). The gap between them can contain neither a period
+ * nor another number, so "2 hours weekdays, 4 hours weekends" can never
+ * cross-match, and minutes ("90 minutes") convert to hours.
  */
+const HOUR_UNIT = "(?:hours?|hrs?|h|min(?:ute)?s?|m)";
+const WEEKDAY_MARKER =
+  "(?:\\bweekdays?|\\bschool\\s+days?|\\bmon(?:day)?|\\btue(?:sday)?|\\bwed(?:nesday)?|\\bthu(?:rsday)?)";
+const WEEKEND_MARKER =
+  "(?:\\bweekends?|\\bsaturdays?|\\bsundays?|\\bholidays?)";
+
+function toHours(value: string, unit: string): number | null {
+  const n = Number.parseFloat(value.replace(",", "."));
+  const hours = unit.startsWith("m") ? n / 60 : n;
+  return clampNumber(hours, 0.25, 24);
+}
+
+/** First number anchored to a marker occurrence, in either direction. */
+function hoursInClause(clause: string, markerSource: string): number | null {
+  const marker = new RegExp(markerSource, "gi");
+  let match: RegExpExecArray | null;
+  while ((match = marker.exec(clause)) !== null) {
+    const before = clause.slice(Math.max(0, match.index - 32), match.index);
+    const afterStart = match.index + match[0].length;
+    const after = clause.slice(afterStart, afterStart + 32);
+    // Number AFTER the marker: "weekends 4h".
+    const afterMatch = new RegExp(
+      `[^.\\n\\d]{0,20}(\\d+(?:[.,]\\d+)?)\\s*(${HOUR_UNIT})\\b`,
+      "i",
+    ).exec(after);
+    if (afterMatch) {
+      const h = toHours(afterMatch[1], afterMatch[2]);
+      if (h !== null) return h;
+    }
+    // Number BEFORE the marker: "4 hours on weekdays".
+    const beforeMatch = new RegExp(
+      `(?:^|[^.\\n\\d])(\\d+(?:[.,]\\d+)?)\\s*(${HOUR_UNIT})\\b[^.\\n\\d]{0,20}$`,
+      "i",
+    ).exec(before);
+    if (beforeMatch) {
+      const h = toHours(beforeMatch[1], beforeMatch[2]);
+      if (h !== null) return h;
+    }
+  }
+  return null;
+}
+
+/**
+ * Splits free text into clauses so "2 hours weekdays, 4 hours weekends" can
+ * never cross-match: each marker only sees the numbers in its own clause
+ * (commas / periods / semicolons / newlines / "and" / "plus" split).
+ */
+function clausesOf(text: string): string[] {
+  return text.split(/[,.;:\n]|\s+and\s+|\s+plus\s+|\s+with\s+/i);
+}
+
+function hoursNearMarker(text: string, markerSource: string): number | null {
+  for (const clause of clausesOf(text)) {
+    const h = hoursInClause(clause, markerSource);
+    if (h !== null) return h;
+  }
+  return null;
+}
+
 export function extractPlanParams(text: string): {
   weekdayHours: number | null;
   weekendHours: number | null;
@@ -70,64 +132,44 @@ export function extractPlanParams(text: string): {
 } {
   const lower = text.toLowerCase();
 
-  // "2 hours on weekdays" / "weekday 2h" / "2h on school days"
-  let weekdayHours: number | null = null;
-  const wd =
-    /(\d+(?:[.,]\d+)?)\s*(?:hours?|hrs?|h)\b[^.\n]{0,28}(?:weekday|weekdays|school\s+days?|mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?)|(?:weekday|weekdays|school\s+days?|mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?)[^.\n]{0,28}(\d+(?:[.,]\d+)?)\s*(?:hours?|hrs?|h)\b/i.exec(
-      lower,
-    );
-  if (wd) {
-    weekdayHours = clampNumber(
-      Number.parseFloat((wd[1] ?? wd[2] ?? "").replace(",", ".")),
-      0.25,
-      24,
-    );
-  }
+  let weekdayHours = hoursNearMarker(lower, WEEKDAY_MARKER);
+  let weekendHours = hoursNearMarker(lower, WEEKEND_MARKER);
 
-  // "4 hours on weekends" / "weekends 4h" / "saturday 4 hours"
-  let weekendHours: number | null = null;
-  const we =
-    /(\d+(?:[.,]\d+)?)\s*(?:hours?|hrs?|h)\b[^.\n]{0,28}(?:weekends?|saturday|sunday|holiday|friday)|(?:weekends?|saturday|sunday|holiday)[^.\n]{0,28}(\d+(?:[.,]\d+)?)\s*(?:hours?|hrs?|h)\b/i.exec(
-      lower,
-    );
-  if (we) {
-    weekendHours = clampNumber(
-      Number.parseFloat((we[1] ?? we[2] ?? "").replace(",", ".")),
-      0.25,
-      24,
-    );
-  }
-
-  // A single daily number applies to both: "I study 3 hours a day"
+  // A single daily number applies to both: "I study 3 hours a day".
   if (weekdayHours === null && weekendHours === null) {
-    const perDay =
-      /(?:\b(?:i\s+)?study\b|\bstudy\s+time\b)[^.\n]{0,24}?(\d+(?:[.,]\d+)?)\s*(?:hours?|hrs?|h)\b/i.exec(
-        lower,
-      )
-        ?? /(\d+(?:[.,]\d+)?)\s*(?:hours?|hrs?|h)\b[^.\n]{0,16}\b(?:a|per)\s+day\b/i.exec(
-          lower,
-        );
+    const perDay = new RegExp(
+      `(\\d+(?:[.,]\\d+)?)\\s*(${HOUR_UNIT})\\b[^.\\n\\d]{0,16}\\b(?:a|per)\\s+day\\b`,
+      "i",
+    ).exec(lower);
     if (perDay) {
-      const n = clampNumber(
-        Number.parseFloat(perDay[1].replace(",", ".")),
-        0.25,
-        24,
-      );
-      weekdayHours = n;
-      weekendHours = n;
+      const h = toHours(perDay[1], perDay[2]);
+      weekdayHours = h;
+      weekendHours = h;
     }
+  } else if (weekdayHours === null) {
+    // Only weekend hours stated: "4 hours on weekends" — assume the same on
+    // weekdays rather than silently defaulting to 120; the reply labels it.
+    weekdayHours = weekendHours;
+  } else if (weekendHours === null) {
+    weekendHours = weekdayHours;
   }
 
   // Deadline: "7 months" → "12 weeks" → "60 days" (converted to months).
+  // Week/day numbers only count when they look like a real span: "6 days a
+  // week" or "3 weeks of revision" are rhythms, not deadlines.
   let months: number | null = null;
   const mo = /\b(\d+(?:[.,]\d+)?)\s*months?\b/i.exec(lower);
-  const wk = /\b(\d+(?:[.,]\d+)?)\s*weeks?\b/i.exec(lower);
-  const dy = /\b(\d+(?:[.,]\d+)?)\s*days?\b/i.exec(lower);
+  const wk = /\b(\d+(?:[.,]\d+)?)\s*weeks?\b(?!\s*(?:a|per|each)\s+week)/i.exec(
+    lower,
+  );
+  const dy = /\b(\d+(?:[.,]\d+)?)\s*days?\b(?!\s*(?:a|per|each)\s+(?:week|month))/i.exec(
+    lower,
+  );
   if (mo) {
     months = clampNumber(Number.parseFloat(mo[1].replace(",", ".")), 0.2, 60);
-  } else if (wk) {
+  } else if (wk && Number.parseFloat(wk[1].replace(",", ".")) >= 3) {
     months = clampNumber(Number.parseFloat(wk[1].replace(",", ".")) / 4.345, 0.2, 60);
-  } else if (dy) {
+  } else if (dy && Number.parseFloat(dy[1].replace(",", ".")) >= 21) {
     months = clampNumber(
       Number.parseFloat(dy[1].replace(",", ".")) / 30.4375,
       0.2,
@@ -324,12 +366,17 @@ export function buildStudyPlan(
 export const TRUSTED_YOUTUBE_CHANNELS: readonly string[] = [
   "Udvash Unmesh",
   "Udvash",
+  "উদ্ভাস", // Udvash-Unmesh (Bangla-script channel name)
+  "উন্মেষ",
   "10 Minute School",
   "Ten Minute School",
+  "১০ মিনিট স্কুল", // 10 Minute School (Bangla)
   "Amader School",
+  "আমাদের স্কুল",
   "ACS",
   "Academic & Career School",
   "Chaya Prakashani",
+  "ছায়া প্রকাশনী",
   "Physics 247",
   "Khan Academy",
   "3Blue1Brown",

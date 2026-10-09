@@ -349,7 +349,10 @@ export const chat = action({
     const latestUserText = [...args.history]
       .reverse()
       .find((turn) => turn.role === "user")?.text ?? "";
-    const planningAsk = isPlanningIntent(latestUserText);
+    // Progress questions ("how am I doing in my syllabus") must never be
+    // mistaken for planning asks, even when both match a pattern.
+    const progressAsk = isProgressIntent(latestUserText);
+    const planningAsk = isPlanningIntent(latestUserText) && !progressAsk;
     const wantsFullSchedule =
       /\b(full|entire|whole|detailed|complete)\b[^.\n]{0,40}\b(plan|schedule|roadmap|week.?by.?week)\b|\bweek.?by.?week\b|\bevery\s+week\b/i.test(
         latestUserText,
@@ -381,7 +384,6 @@ export const chat = action({
 
     let planContext: string | null = null;
     let planMissions: { itemIds: string[]; labels: string[] } | undefined;
-    let planningChips: string[] | undefined;
     let planningReply = false;
 
     if (planningAsk || pushback) {
@@ -461,7 +463,7 @@ export const chat = action({
     let searchNotice: string | undefined;
     let searchNoticeKind: "userLimit" | "providerQuota" | "other" | undefined;
     // C5: planning, schedules and progress questions never need the web.
-    if (grounding && (planningReply || isProgressIntent(latestUserText))) {
+    if (grounding && (planningReply || progressAsk)) {
       grounding = false;
     }
     if (grounding && hasImage) {
@@ -677,7 +679,6 @@ export const chat = action({
       if (searchQueries.length > 0) result.searchQueries = searchQueries;
       if (searchNotice) result.searchNotice = searchNotice;
       if (searchNoticeKind) result.searchNoticeKind = searchNoticeKind;
-      if (planningChips) result.chips = planningChips;
       if (planMissions) result.planMissions = planMissions;
       if (grounded) result.grounded = true;
       if (searchEntryPointUrl) result.searchEntryPointUrl = searchEntryPointUrl;
