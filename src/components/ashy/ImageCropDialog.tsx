@@ -327,7 +327,12 @@ export function ImageCropDialog({
       setZoom(MIN_ZOOM);
       setPan({ x: 0, y: 0 });
       setMode("select");
-    } catch {
+    } catch (error) {
+      // TEMP DIAGNOSTIC — no image data, just the reason.
+      console.error(
+        "[ashy-diag] crop: rotate failed",
+        error instanceof Error ? error.message : "unknown",
+      );
       toast("Couldn't rotate that image", {
         description: "You can still crop it as it is.",
       });
@@ -399,9 +404,14 @@ export function ImageCropDialog({
       const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
       onConfirm(dataUrl);
       onClose();
-    } catch {
+    } catch (error) {
       // Encoding failed (e.g. an unusually large canvas). The selection and
       // the image stay exactly where they are so the student can retry.
+      // TEMP DIAGNOSTIC — canvas/encode reason only, never pixel data.
+      console.error(
+        "[ashy-diag] crop/encode failed",
+        error instanceof Error ? error.message : "unknown",
+      );
       toast("Couldn't crop that image", {
         description:
           "Your selection is still here — try again, or reset and pick a smaller area.",
@@ -464,6 +474,8 @@ export function ImageCropDialog({
                   className="block max-h-[55vh] max-w-full"
                   onLoad={() => setImageReady(true)}
                   onError={() => {
+                    // TEMP DIAGNOSTIC — decode failure of the data URL.
+                    console.error("[ashy-diag] crop: image failed to decode");
                     setImageReady(false);
                     toast("Couldn't load that image", {
                       description: "Please pick a different file.",

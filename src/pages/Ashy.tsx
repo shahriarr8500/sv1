@@ -228,6 +228,8 @@ export default function AshyPage() {
             { id: newId(), role: "assistant", text: result.text },
           ]);
         } else {
+          // TEMP DIAGNOSTIC — backend failure kind only (never message/image data).
+          console.error(`[ashy-diag] backend returned failure kind=${result.kind}`);
           mutate(conversationId, (previous) => [
             ...previous,
             {
@@ -238,7 +240,12 @@ export default function AshyPage() {
             },
           ]);
         }
-      } catch {
+      } catch (error) {
+        // TEMP DIAGNOSTIC — network/Convex failure (truncated, no payloads).
+        console.error(
+          "[ashy-diag] network/action failed:",
+          String(error).slice(0, 200),
+        );
         if (requestIdRef.current !== myRequest) return;
         mutate(conversationId, (previous) => [
           ...previous,
@@ -339,6 +346,8 @@ export default function AshyPage() {
   const handleFile = useCallback(async (file: File | undefined) => {
     if (!file) return; // student cancelled the picker — nothing to do
     if (!isAcceptedImage(file)) {
+      // TEMP DIAGNOSTIC (no file contents, just type/size) — remove after verifying live.
+      console.error(`[ashy-diag] picker: unsupported type "${file.type}"`);
       toast("Unsupported image", {
         description:
           "Please use a PNG, JPEG, or WebP image. HEIC/HEIF isn't supported by this browser's image tools.",
@@ -346,6 +355,7 @@ export default function AshyPage() {
       return;
     }
     if (file.size > MAX_IMAGE_BYTES) {
+      console.error(`[ashy-diag] picker: file too large (${file.size} bytes)`);
       toast("Image too large", {
         description: "Please choose an image under 8 MB.",
       });
@@ -356,7 +366,11 @@ export default function AshyPage() {
       setPreviewLarge(false);
       setCropSrc(dataUrl);
       setCropOpen(true);
-    } catch {
+    } catch (error) {
+      console.error(
+        "[ashy-diag] picker: could not read file",
+        error instanceof Error ? error.message : "unknown",
+      );
       toast("Couldn't read that image", { description: "Please try another file." });
     }
   }, []);
