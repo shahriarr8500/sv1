@@ -19,6 +19,7 @@ import {
   Check,
   Copy,
   Crop,
+  Globe,
   History,
   Image as ImageIcon,
   ImagePlus,
@@ -45,6 +46,11 @@ import { cn } from "@/lib/utils";
 import { MessageContent } from "@/components/ashy/MessageContent";
 import { CameraCaptureDialog } from "@/components/ashy/CameraCaptureDialog";
 import {
+  AshyVideoCard,
+  AshyVideoPlayer,
+} from "@/components/ashy/AshyVideoPlayer";
+import { SourcesRow } from "@/components/ashy/SourcesRow";
+import {
   ImageCropDialog,
   MAX_IMAGE_BYTES,
   isAcceptedImage,
@@ -56,6 +62,7 @@ import {
   ASHY_STARTERS,
   type AshyConversation,
   type AshyMessage,
+  type AshyVideo,
   buildHistory,
   createDictation,
   newId,
@@ -64,6 +71,7 @@ import {
   speechOutputSupported,
   stopSpeaking,
 } from "@/lib/ashy";
+import { youtubeSearchUrl } from "@/lib/ashy-youtube";
 
 function emptyConversation(): AshyConversation {
   return { id: newId(), title: "New chat", messages: [] };
@@ -79,7 +87,7 @@ function titleFrom(text: string): string {
 /* Pieces                                                                      */
 /* -------------------------------------------------------------------------- */
 
-function ThinkingIndicator() {
+function ThinkingIndicator({ searching }: { searching?: boolean }) {
   return (
     <li className="flex items-center gap-3">
       <span
@@ -88,18 +96,26 @@ function ThinkingIndicator() {
       >
         <Sparkles className="size-4" />
       </span>
-      <span className="flex items-center gap-1.5 rounded-lg border bg-card px-3 py-2 text-sm text-muted-foreground">
-        Ashy is thinking
-        <span className="flex gap-1">
-          {[0, 1, 2].map((index) => (
-            <span
-              key={index}
-              className="size-1.5 animate-bounce rounded-full bg-primary/60"
-              style={{ animationDelay: `${index * 0.15}s` }}
-            />
-          ))}
+      <div className="space-y-1.5">
+        <span className="flex items-center gap-1.5 rounded-lg border bg-card px-3 py-2 text-sm text-muted-foreground">
+          Ashy is thinking
+          <span className="flex gap-1">
+            {[0, 1, 2].map((index) => (
+              <span
+                key={index}
+                className="size-1.5 animate-bounce rounded-full bg-primary/60"
+                style={{ animationDelay: `${index * 0.15}s` }}
+              />
+            ))}
+          </span>
         </span>
-      </span>
+        {searching ? (
+          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Globe className="size-3.5" aria-hidden />
+            Searching the web…
+          </span>
+        ) : null}
+      </div>
     </li>
   );
 }
@@ -167,6 +183,13 @@ export default function AshyPage() {
   const [attachOpen, setAttachOpen] = useState(false);
   /** "Take photo" modal for devices without a capture input. */
   const [cameraOpen, setCameraOpen] = useState(false);
+  /** Web-search preference for each message (Phase 4 toggle chip). */
+  const [searchMode, setSearchMode] = useState<"auto" | "on" | "off">("auto");
+  /** In-app video player: modal, or minimized above the composer. */
+  const [player, setPlayer] = useState<{
+    video: AshyVideo;
+    mode: "dialog" | "mini";
+  } | null>(null);
   const [listening, setListening] = useState(false);
   const [speakingId, setSpeakingId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -230,12 +253,24 @@ export default function AshyPage() {
         const result = await chatAction({
           history: buildHistory(historyMessages),
           context: contextText,
+          searchMode,
         });
         if (requestIdRef.current !== myRequest) return; // stopped or superseded
         if (result.ok) {
           mutate(conversationId, (previous) => [
             ...previous,
-            { id: newId(), role: "assistant", text: result.text },
+            {
+              id: newId(),
+              role: "assistant",
+              text: result.text,
+              videos: result.videos,
+              videoSearch: result.videoSearch,
+              sources: result.sources,
+              searchQueries: result.searchQueries,
+              searchNotice: result.searchNotice,
+              grounded: result.grounded,
+              searchEntryPointUrl: result.searchEntryPointUrl,
+            },
           ]);
         } else {
           // TEMP DIAGNOSTIC — backend failure kind only (never message/image data).
@@ -270,7 +305,7 @@ export default function AshyPage() {
         if (requestIdRef.current === myRequest) setBusy(false);
       }
     },
-    [chatAction, mutate],
+    [chatAction, mutate, searchMode],
   );
 
   const sendMessage = useCallback(async () => {
@@ -668,9 +703,57 @@ export default function AshyPage() {
                       </div>
                     ) : (
                       <>
-                        <div className="rounded-xl border bg-card px-3.5 py-3">
-                          <MessageContent text={message.text} />
-                        </div>
+                        {message.text ? (
+                          <div className="rounded-xl border bg-card px-3.5 py-3">
+                            <MessageContent text={message.text} />
+                          </div>
+                        ) : null}
+
+                        {message.searchNotice ? (
+                          <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+                            {message.searchNotice}
+                          </p>
+                        ) : null}
+
+                        {message.videos?.length ? (
+                          <div
+                            role="list"
+                            aria-label="Videos"
+                            className="flex flex-wrap gap-2"
+                          >
+                            {message.videos.map((video) => (
+                              <AshyVideoCard
+                                key={video.videoId}
+                                video={video}
+                                onPlay={(picked) =>
+                                  setPlayer({ video: picked, mode: "dialog" })
+                                }
+                              />
+                            ))}
+                          </div>
+                        ) : null}
+
+                        {message.videoSearch ? (
+                          <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-card px-3 py-2 text-xs text-muted-foreground">
+                            <span>{message.videoSearch.message}</span>
+                            <a
+                              href={youtubeSearchUrl(message.videoSearch.query)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="font-medium text-primary underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                            >
+                              Search on YouTube
+                            </a>
+                          </div>
+                        ) : null}
+
+                        {message.sources?.length ? (
+                          <SourcesRow
+                            sources={message.sources}
+                            searchQueries={message.searchQueries}
+                            searchEntryPointUrl={message.searchEntryPointUrl}
+                          />
+                        ) : null}
 
                         <div className="flex flex-wrap items-center gap-1">
                           <Button
@@ -722,7 +805,9 @@ export default function AshyPage() {
               );
             })}
 
-            {busy ? <ThinkingIndicator /> : null}
+            {busy ? (
+              <ThinkingIndicator searching={searchMode !== "off"} />
+            ) : null}
           </ul>
         )}
       </div>
@@ -795,6 +880,50 @@ export default function AshyPage() {
           </Button>
         </div>
       ) : null}
+
+      {/* Minimized video player — deliberately above the composer so it never
+          covers it on mobile. */}
+      {player?.mode === "mini" ? (
+        <div className="mb-2 flex justify-end">
+          <AshyVideoPlayer
+            video={player.video}
+            mode="mini"
+            onRestore={() =>
+              setPlayer((current) =>
+                current ? { ...current, mode: "dialog" } : current,
+              )
+            }
+            onClose={() => setPlayer(null)}
+          />
+        </div>
+      ) : null}
+
+      {/* Web-search toggle for the next message (Phase 4). */}
+      <div className="mb-1.5 flex items-center justify-end">
+        <button
+          type="button"
+          onClick={() =>
+            setSearchMode((mode) =>
+              mode === "auto" ? "on" : mode === "on" ? "off" : "auto",
+            )
+          }
+          aria-pressed={searchMode === "on"}
+          aria-label={`Search the web: ${searchMode}. Activate to change.`}
+          title="Auto: Ashy searches when needed. On: always search. Off: never search."
+          className={cn(
+            "inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+            searchMode === "off"
+              ? "text-muted-foreground"
+              : "border-primary/40 bg-primary/10 text-primary",
+          )}
+        >
+          <Globe className="size-3.5" aria-hidden />
+          Search the web:
+          <span>
+            {searchMode === "auto" ? "Auto" : searchMode === "on" ? "On" : "Off"}
+          </span>
+        </button>
+      </div>
 
       {/* Composer */}
       <form
@@ -999,6 +1128,19 @@ export default function AshyPage() {
           openFilePicker();
         }}
       />
+
+      {player?.mode === "dialog" ? (
+        <AshyVideoPlayer
+          video={player.video}
+          mode="dialog"
+          onMinimize={() =>
+            setPlayer((current) =>
+              current ? { ...current, mode: "mini" } : current,
+            )
+          }
+          onClose={() => setPlayer(null)}
+        />
+      ) : null}
     </div>
   );
 }

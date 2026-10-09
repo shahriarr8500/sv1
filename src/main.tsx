@@ -4,6 +4,7 @@ import { RequireAccessPass } from "@/components/RequireAccessPass";
 import { RequireAuth } from "@/components/RequireAuth";
 import { AppShell } from "@/components/student-os/AppShell";
 import { StudentOSProvider } from "@/state/student-os";
+import { AshyProgressStatsSync } from "@/components/ashy/ProgressStatsSync";
 import { WorkspaceProvider } from "@/state/workspace";
 import { StudyLogProvider } from "@/state/study-log";
 import { TargetsProvider } from "@/state/targets";
@@ -160,6 +161,8 @@ createRoot(document.getElementById("root")!).render(
                   <GamificationProvider>
                     <BrowserRouter>
                       <RouteSyncer />
+                      {/* Headless: mirrors study time + streak for Ashy. */}
+                      <AshyProgressStatsSync />
                       <Suspense fallback={<RouteLoading />}>
                         <Routes>
                           <Route path="/" element={<Landing />} />

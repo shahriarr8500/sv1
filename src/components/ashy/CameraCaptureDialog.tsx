@@ -104,6 +104,19 @@ export function CameraCaptureDialog({
   /** Bumped by a failed capture so the stream restarts for another try. */
   const [attempt, setAttempt] = useState(0);
 
+  // Adjusting state during render (React's documented alternative to doing it
+  // inside an effect): each time the dialog opens or retries, the error state
+  // clears and the "starting" hint shows until the stream resolves.
+  const startKey = `${open}:${deviceId ?? "default"}:${attempt}`;
+  const [lastStartKey, setLastStartKey] = useState(startKey);
+  if (startKey !== lastStartKey) {
+    setLastStartKey(startKey);
+    if (open) {
+      setProblem(null);
+      setStarting(true);
+    }
+  }
+
   /** Stops every track — the camera light must go off on every exit path. */
   const stopStream = useCallback(() => {
     const stream = streamRef.current;
@@ -119,8 +132,6 @@ export function CameraCaptureDialog({
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    setProblem(null);
-    setStarting(true);
 
     const fail = (kind: CameraProblem, errorName: string) => {
       if (cancelled) return;

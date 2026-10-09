@@ -55,6 +55,32 @@ const schema = defineSchema(
       .index("adminUserId", ["adminUserId"])
       .index("active", ["active"]),
 
+    // Hourly cache of identical YouTube searches made by Ashy (Phase 3), so
+    // repeated "video on vectors" asks don't burn API quota. Keyed by the
+    // normalized search query; entries expire after ~1 hour.
+    ashyVideoCache: defineTable({
+      key: v.string(),
+      results: v.array(
+        v.object({
+          videoId: v.string(),
+          title: v.string(),
+          channel: v.string(),
+          thumbnail: v.string(),
+          durationLabel: v.string(),
+        }),
+      ),
+      createdAt: v.number(),
+      expiresAt: v.number(),
+    }).index("key", ["key"]),
+
+    // Per-user daily counters for Ashy's web-search features (Phase 4).
+    // Grounded searches are capped at a constant per user per day.
+    ashySearchUsage: defineTable({
+      userId: v.id("users"),
+      day: v.string(),
+      groundedCount: v.number(),
+    }).index("userId_day", ["userId", "day"]),
+
     // tableName: defineTable({
     //   ...
     //   // table fields

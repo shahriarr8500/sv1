@@ -27,6 +27,41 @@ export interface AshyMessage {
   images?: AshyImage[];
   /** Set on assistant messages that represent a failure instead of an answer. */
   error?: AshyFailureKind;
+  /** Real YouTube results the backend searched for (never invented). */
+  videos?: AshyVideo[];
+  /** Set when the video search itself failed — carries fallback copy + query. */
+  videoSearch?: AshyVideoSearchFailure;
+  /** Google Search sources backing a searched answer. */
+  sources?: AshySource[];
+  /** The Google Search queries the model ran for this answer. */
+  searchQueries?: string[];
+  /** Honest note about skipped/failed/rate-limited web search. */
+  searchNotice?: string;
+  /** True when the answer was grounded in live Google Search results. */
+  grounded?: boolean;
+  /** Google's Search-suggestions entry point (a plain link). */
+  searchEntryPointUrl?: string;
+}
+
+/** One real, backend-searched YouTube video. */
+export interface AshyVideo {
+  videoId: string;
+  title: string;
+  channel: string;
+  thumbnail: string;
+  durationLabel: string;
+}
+
+export interface AshyVideoSearchFailure {
+  query: string;
+  ok: false;
+  message: string;
+}
+
+export interface AshySource {
+  title: string;
+  url: string;
+  domain: string;
 }
 
 /** One turn as the server-side action expects it. */

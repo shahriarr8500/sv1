@@ -32,20 +32,39 @@ async function requireActiveUser(
  * document so the admin console can read and correct it. A student can only
  * ever write their own record — except while an admin is impersonating them,
  * in which case the write is routed to the account being impersonated.
+ *
+ * All arguments are optional and the write MERGES: the profile/completions
+ * sync from the Student OS provider keeps any `stats` already mirrored, and
+ * the lighter study-time/streak sync from Ashy's stats mirror keeps the
+ * profile and completions untouched.
  */
 export const syncMyProgress = mutation({
   args: {
     profile: v.optional(v.any()),
-    completions: v.record(v.string(), v.number()),
+    completions: v.optional(v.record(v.string(), v.number())),
+    /** Derived study time + streak (Phase 2 awareness) — merged, not owned. */
+    stats: v.optional(v.any()),
   },
   handler: async (ctx, args) => {
     const callerId = await requireActiveUser(ctx);
 
     const targetId = await resolveWriteTarget(ctx, callerId);
+    const target = await ctx.db.get(targetId);
+    const existing = (target?.progress ?? undefined) as
+      | {
+          profile?: unknown;
+          completions?: Record<string, number>;
+          stats?: unknown;
+        }
+      | undefined;
     await ctx.db.patch(targetId, {
       progress: {
-        profile: args.profile ?? null,
-        completions: args.completions,
+        profile: args.profile !== undefined ? args.profile : existing?.profile ?? null,
+        completions:
+          args.completions !== undefined
+            ? args.completions
+            : existing?.completions ?? {},
+        stats: args.stats !== undefined ? args.stats : existing?.stats ?? null,
         updatedAt: Date.now(),
       },
     });
