@@ -56,6 +56,11 @@ export interface ChatHeaderProps {
   onNewProjectForChat: () => void;
   onExport: (format: "text" | "markdown") => void;
   onDeleteChat: () => void;
+  /** True while an admin is viewing another student's account. When true the
+   * header disables every write action (new chat, rename, pin, move, delete,
+   * new project) and shows a tooltip explaining why. Reading and history stay
+   * fully interactive. */
+  readOnly?: boolean;
 }
 
 function Seg<T extends string>({
@@ -116,7 +121,12 @@ export function ChatHeader(props: ChatHeaderProps) {
     onNewProjectForChat,
     onExport,
     onDeleteChat,
+    readOnly = false,
   } = props;
+
+  const writeDisabled = readOnly;
+  const writeReason =
+    "Read-only while viewing another student's account";
   return (
     <div className="flex items-center gap-1.5 border-b pb-2.5">
       <Button
@@ -173,7 +183,9 @@ export function ChatHeader(props: ChatHeaderProps) {
         type="button"
         variant="outline"
         size="sm"
+        disabled={writeDisabled}
         onClick={onNewChat}
+        title={writeDisabled ? writeReason : "New chat"}
         className="shrink-0 cursor-pointer gap-1.5"
       >
         <Plus className="size-3.5" aria-hidden />
@@ -259,12 +271,20 @@ export function ChatHeader(props: ChatHeaderProps) {
                 <MoreHorizontal className="size-4" aria-hidden />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-52">
-              <DropdownMenuItem className="cursor-pointer" onSelect={onRenameChat}>
+            <DropdownMenuContent align="end" className="w-52">              <DropdownMenuItem
+                className="cursor-pointer"
+                disabled={writeDisabled}
+                onSelect={onRenameChat}
+                title={writeDisabled ? writeReason : "Rename chat"}
+              >
                 <Pencil className="size-4" aria-hidden />
                 Rename
-              </DropdownMenuItem>
-              <DropdownMenuItem className="cursor-pointer" onSelect={onTogglePin}>
+              </DropdownMenuItem>              <DropdownMenuItem
+                className="cursor-pointer"
+                disabled={writeDisabled}
+                onSelect={onTogglePin}
+                title={writeDisabled ? writeReason : "Pin / unpin chat"}
+              >
                 {pinned ? (
                   <PinOff className="size-4" aria-hidden />
                 ) : (
@@ -279,7 +299,9 @@ export function ChatHeader(props: ChatHeaderProps) {
                 <DropdownMenuSubContent>
                   <DropdownMenuItem
                     className="cursor-pointer"
+                    disabled={writeDisabled}
                     onSelect={() => onMoveChat(null)}
+                    title={writeDisabled ? writeReason : "Move out of project"}
                   >
                     No project
                   </DropdownMenuItem>
@@ -287,7 +309,9 @@ export function ChatHeader(props: ChatHeaderProps) {
                     <DropdownMenuItem
                       key={row.id}
                       className="cursor-pointer"
+                      disabled={writeDisabled}
                       onSelect={() => onMoveChat(row.id)}
+                      title={writeDisabled ? writeReason : "Move to project"}
                     >
                       <span className="truncate">
                         {row.emoji ? `${row.emoji} ` : ""}
@@ -298,7 +322,9 @@ export function ChatHeader(props: ChatHeaderProps) {
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
                     className="cursor-pointer"
+                    disabled={writeDisabled}
                     onSelect={onNewProjectForChat}
+                    title={writeDisabled ? writeReason : "New project"}
                   >
                     <FolderPlus className="size-4" aria-hidden />
                     New project…
@@ -323,7 +349,9 @@ export function ChatHeader(props: ChatHeaderProps) {
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 className="cursor-pointer text-destructive focus:text-destructive"
+                disabled={writeDisabled}
                 onSelect={onDeleteChat}
+                title={writeDisabled ? writeReason : "Delete chat"}
               >
                 <Trash2 className="size-4" aria-hidden />
                 Delete chat

@@ -100,6 +100,7 @@ import {
 } from "@/lib/ashy";
 import { youtubeSearchUrl } from "@/lib/ashy-youtube";
 import { useTargets } from "@/state/targets";
+import { useImpersonation } from "@/hooks/use-impersonation";
 import { todayKey } from "@/lib/student-os/target-calendar";
 import { lookupItem } from "@/lib/student-os/syllabus";
 import { xpForSubject } from "@/lib/student-os/gamification";
@@ -201,6 +202,11 @@ export default function AshyPage() {
   const context =
     rawContext && !contextDismissed ? rawContext.trim() : undefined;
 
+  /* --- impersonation --------------------------------------------- */
+  const { isImpersonating, target } = useImpersonation();
+  const effectiveTargetId =
+    isImpersonating && target ? target.id : null;
+
   /* --- local preferences, panel and drafts ----------------------------- */
   const [prefs, setPrefs] = useState<AshyPrefs>(() => loadAshyPrefs());
   const [panelOpen, setPanelOpen] = useState<boolean>(() => loadAshyPanelOpen());
@@ -289,6 +295,9 @@ export default function AshyPage() {
   const renameProjectMut = useMutation(api.ashyConversations.renameProject);
   const updateProjectMut = useMutation(api.ashyConversations.updateProject);
   const deleteProjectMut = useMutation(api.ashyConversations.deleteProject);
+  const reportHistoryViewedMut =
+    useMutation(api.ashyConversations.reportAshyHistoryViewed);
+  const reportChatOpenedMut = useMutation(api.ashyConversations.reportAshyChatOpened);
 
   const { addMissions } = useTargets();
   const requestIdRef = useRef(0);
@@ -358,6 +367,12 @@ export default function AshyPage() {
   const hasChat = messages.length > 0;
   const busyForActive = busy && busyConvId === activeId;
   const conversationLoading = activeId !== null && conversation === undefined;
+
+  // Read-only while an admin is viewing another student's account: every write
+  // path is blocked on the backend, and the UI reflects that so the admin has
+  // no expectation they can edit the student's chats.
+  const readOnly =
+    isImpersonating && target !== null && effectiveTargetId !== null;
 
   /** Only the newest search notice renders — once per conversation. */
   const latestNoticeIndex = useMemo(() => {
@@ -450,6 +465,50 @@ export default function AshyPage() {
       );
     }
   }, [serverMessages]);
+
+  // When impersonation starts or the target changes, clear every local piece
+  // of Ashy state that could otherwise show the previous user's chats,
+  // drafts, search results or deep link. The backend now controls which chats
+  // are returned, but the client still keeps per-conversation drafts and the
+  // active conversation id in memory + localStorage, so those must be reset.
+  const previousTargetRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (isImpersonating && effectiveTargetId) {
+      // Report that the admin opened this target's Ashy history (server-deduped).
+      void reportHistoryViewedMut({});
+    }
+  }, [isImpersonating, effectiveTargetId, reportHistoryViewedMut]);
+
+  // Key drafts by the effective user so stopping impersonation cannot leave
+  // the student's drafts behind in localStorage for the admin to see later.
+  useEffect(() => {
+    if (!isImpersonating) {
+      // Back to the admin's own account: drop any residual target drafts and
+      // reset the active chat so a stale deep link can't be reopened.
+      if (previousTargetRef.current !== null) {
+        saveAshyDraft(null, null);
+        applyActiveId(null);
+        setSearchInput("");
+        setSearchTerm("");
+      }
+      previousTargetRef.current = null;
+      return;
+    }
+    if (effectiveTargetId === previousTargetRef.current) return;
+    previousTargetRef.current = effectiveTargetId;
+    // New target: clear the prior chat, drafts, search and pending state.
+    applyActiveId(null);
+    saveAshyDraft(null, null);
+    setSearchInput("");
+    setSearchTerm("");
+  }, [isImpersonating, effectiveTargetId]);
+
+  // While impersonating, report each chat the admin opens (server-deduped).
+  // This runs after applyActiveId commits the new activeId.
+  useEffect(() => {
+    if (!isImpersonating || !activeId) return;
+    void reportChatOpenedMut({ conversationId: activeId });
+  }, [isImpersonating, activeId, reportChatOpenedMut]);
 
   /* --- URL sync + missing chats ----------------------------------------- */
 
@@ -1304,7 +1363,22 @@ export default function AshyPage() {
           }
           onExport={exportChat}
           onDeleteChat={() => activeId && deleteChat(activeId)}
+          readOnly={readOnly}
         />
+
+        {/* Read-only notice while an admin is viewing another student's
+        account. Quiet, non-blocking, and never reveals message content. */}
+        {readOnly && target ? (
+          <div className="mt-3 flex items-center justify-between gap-2 rounded-lg border bg-card px-3 py-2 text-xs">
+            <p className="min-w-0 flex-1 truncate text-muted-foreground">
+              <span className="font-semibold text-foreground">Viewing </span>
+              <span className="font-semibold text-primary">
+                {target.name || target.email || "this account"}
+              </span>
+              <span className="text-muted-foreground">· read-only</span>
+            </p>
+          </div>
+        ) : null}
 
         {/* Study context handed over from a mission or chapter */}
         {context ? (
@@ -1397,20 +1471,21 @@ export default function AshyPage() {
                             </div>
                           ) : null}
                           {isLastUser && !busy && !editingId ? (
-                            <div className="flex justify-end">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 cursor-pointer gap-1.5 px-2 text-xs text-muted-foreground"
-                                onClick={() => {
-                                  setEditingId(message.id);
-                                  setDraft(message.text);
-                                  textareaRef.current?.focus();
-                                }}
-                              >
-                                <Pencil className="size-3.5" aria-hidden />
-                                Edit & resend
-                              </Button>
+                            <div className="flex justify-end">                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 cursor-pointer gap-1.5 px-2 text-xs text-muted-foreground"
+                                    disabled={readOnly}
+                                    onClick={() => {
+                                      setEditingId(message.id);
+                                      setDraft(message.text);
+                                      textareaRef.current?.focus();
+                                    }}
+                                    title={readOnly ? "Read-only while viewing another student's account" : undefined}
+                                  >
+                                    <Pencil className="size-3.5" aria-hidden />
+                                    Edit & resend
+                                  </Button>
                             </div>
                           ) : null}
                         </div>
@@ -1435,7 +1510,7 @@ export default function AshyPage() {
                               <AlertTriangle className="size-4 shrink-0" aria-hidden />
                               {ASHY_FAILURE_COPY[message.error]}
                             </p>
-                            {isLast && !busy ? (
+                            {isLast && !busy && !readOnly ? (
                               <Button
                                 size="sm"
                                 variant="outline"
@@ -1539,12 +1614,13 @@ export default function AshyPage() {
                                 </Button>
                               ) : null}
 
-                              {isLast && !busy ? (
+                              {isLast && !busy && !readOnly ? (
                                 <Button
                                   variant="ghost"
                                   size="sm"
                                   className="h-7 cursor-pointer gap-1.5 px-2 text-xs text-muted-foreground"
                                   onClick={() => void regenerate()}
+                                  title={readOnly ? "Read-only while viewing another student's account" : undefined}
                                 >
                                   <RefreshCw className="size-3.5" aria-hidden />
                                   Regenerate
@@ -1553,7 +1629,7 @@ export default function AshyPage() {
                             </div>
 
                             {/* Quick-reply chips from the answer. */}
-                            {message.chips?.length && isLast && !busy ? (
+                            {message.chips?.length && isLast && !busy && !readOnly ? (
                               <div className="flex flex-wrap gap-2 pt-0.5">
                                 {message.chips.map((chip) => (
                                   <button
@@ -1590,9 +1666,11 @@ export default function AshyPage() {
                                   <Button
                                     size="sm"
                                     className="h-8 cursor-pointer gap-1.5 px-3 text-xs"
+                                    disabled={readOnly}
                                     onClick={() =>
                                       addPlanMissions(message.planMissions!, message.id)
                                     }
+                                    title={readOnly ? "Read-only while viewing another student's account" : undefined}
                                   >
                                     <ListChecks className="size-3.5" aria-hidden />
                                     Add {message.planMissions.itemIds.length}{" "}
@@ -1821,9 +1899,9 @@ export default function AshyPage() {
                 size="icon"
                 aria-label="Attach"
                 aria-haspopup="menu"
-                title="Attach"
+                title={readOnly ? "Read-only while viewing another student's account" : "Attach"}
                 className="shrink-0 text-muted-foreground"
-                disabled={busy}
+                disabled={busy || readOnly}
               >
                 <Paperclip className="size-4" aria-hidden />
               </Button>
@@ -1858,12 +1936,12 @@ export default function AshyPage() {
               variant="ghost"
               size="icon"
               aria-label={listening ? "Stop listening" : "Speak your question"}
-              title={listening ? "Stop listening" : "Speak your question"}
+              title={listening ? "Stop listening" : readOnly ? "Read-only while viewing another student's account" : "Speak your question"}
               className={cn(
                 "shrink-0",
                 listening ? "text-destructive" : "text-muted-foreground",
               )}
-              disabled={busy}
+              disabled={busy || readOnly}
               onClick={toggleListening}
             >
               {listening ? (
@@ -1897,6 +1975,7 @@ export default function AshyPage() {
             placeholder={listening ? "Listening… speak now" : "Type your question…"}
             aria-label="Message Ashy"
             className="max-h-36 min-h-10 flex-1 resize-none border-0 bg-transparent shadow-none focus-visible:ring-0"
+            readOnly={readOnly}
           />
 
           {busy ? (
@@ -1916,9 +1995,9 @@ export default function AshyPage() {
               type="submit"
               size="icon"
               aria-label={editingId ? "Save and resend" : "Send to Ashy"}
-              title={editingId ? "Save and resend" : "Send to Ashy"}
+              title={editingId ? "Save and resend" : readOnly ? "Read-only while viewing another student's account" : "Send to Ashy"}
               className="shrink-0"
-              disabled={!draft.trim() && !pendingImage}
+              disabled={!draft.trim() && !pendingImage || readOnly}
             >
               {draft.trim() || pendingImage ? (
                 <ArrowDown className="size-4" aria-hidden />

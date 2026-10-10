@@ -307,17 +307,20 @@ function ImpersonationBanner() {
   const label = target.name || target.email || "this account";
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-primary/10 px-4 py-2 text-sm lg:px-8">
+    <div
+      className="sticky top-0 z-50 flex w-full items-center justify-between gap-3 border-b bg-primary/10 px-4 py-2 text-sm lg:px-8"
+      style={{ height: "40px" }}
+    >
       <p className="flex min-w-0 items-center gap-2">
         <UserCog className="size-4 shrink-0 text-primary" aria-hidden />
-        <span className="truncate">
+        <span className="min-w-0 flex-1 truncate">
           You are logged in as <span className="font-semibold">{label}</span>
         </span>
       </p>
       <Button
         size="sm"
         variant="outline"
-        className="cursor-pointer"
+        className="shrink-0 cursor-pointer"
         onClick={async () => {
           if (await endImpersonation()) {
             window.location.assign("/admin-console");

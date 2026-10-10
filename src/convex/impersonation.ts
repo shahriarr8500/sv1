@@ -158,9 +158,7 @@ export const targetState = query({
       updatedAt: progress.updatedAt,
     };
   },
-});
-
-/**
+});/**
  * Writes made while impersonating go to the target instead of the admin's own
  * account, so progress changes land on the student whose session is open.
  */
@@ -172,4 +170,107 @@ export async function resolveWriteTarget(
   if (caller?.role !== ROLES.ADMIN) return callerId;
   const grant = await activeGrant(ctx, callerId);
   return grant?.targetUserId ?? callerId;
+}
+
+/**
+ * One backend helper for Ashy (and any future feature) that needs to resolve
+ * the account whose data should be read while impersonation is active.
+ *
+ * Normal users always get their own id. An admin who has an open session gets
+ * the target user id (after the target actually exists in the DB). An admin
+ * with no open session, or a client that supplies an override it is not
+ * entitled to, gets its own id — the override is ignored rather than trusted.
+ *
+ * Callers pass their own auth id (from `getAuthUserId`) as `callerId` and may
+ * optionally supply the target id the client wants to view. The backend is the
+ * only place the override is honored, and only after the admin role is
+ * re-checked from the DB.
+ */
+export async function getEffectiveUser(
+  ctx: AnyCtx,
+  callerId: Id<"users">,
+  requestedTargetUserId?: Id<"users">,
+): Promise<{ effectiveUserId: Id<"users">; isImpersonating: boolean }> {
+  const caller = await ctx.db.get(callerId);
+  if (caller?.role !== ROLES.ADMIN) {
+    // Non-admins always read their own data. Passing someone else's id is
+    // ignored — there is no second impersonation path to accidentally reuse.
+    return { effectiveUserId: callerId, isImpersonating: false };
+  }
+
+  const grant = await activeGrant(ctx, callerId);
+  if (grant === null) {
+    // Admin with no open session: read own data, ignore any requested override.
+    return { effectiveUserId: callerId, isImpersonating: false };
+  }
+
+  const target = await ctx.db.get(grant.targetUserId);
+  if (target === null) {
+    // Session is open but the target no longer exists — treat as no-op so the
+    // admin sees their own account rather than leaking nothing / crashing.
+    return { effectiveUserId: callerId, isImpersonating: false };
+  }
+
+  if (requestedTargetUserId !== undefined) {
+    // When a caller explicitly asks to view another account, only honor it if
+    // it matches the session the admin actually opened. This keeps the helper
+    // safe even if some caller ever passes a non-matching id.
+    if (requestedTargetUserId !== grant.targetUserId) {
+      return { effectiveUserId: callerId, isImpersonating: false };
+    }
+  }
+
+  return { effectiveUserId: grant.targetUserId, isImpersonating: true };
+}
+
+/**
+ * Write an audit entry, de-duplicated so one admin session does not write
+ * hundreds of entries while the student's chats are being scrolled.
+ *
+ * - `view_ashy_history`: once per (admin, target) per 10 minutes.
+ * - `view_ashy_chat`: once per (admin, target, conversation) per 10 minutes.
+ *
+ * When the de-duplication window is still open the call is a no-op. When it
+ * has elapsed, a new entry is inserted. No message text, chat titles, project
+ * names or keys are ever stored — only the conversation id for
+ * `view_ashy_chat`, and only status/kind tokens elsewhere.
+ *
+ * This function must be called from a mutation/action (a context that supports
+ * writes), never from a plain query, because it inserts into
+ * `adminAuditLog`.
+ */
+export async function recordAdminAuditIfDue(
+  ctx: GenericMutationCtx<DataModel>,
+  adminUserId: Id<"users">,
+  targetUserId: Id<"users">,
+  action: "view_ashy_history" | "view_ashy_chat",
+  conversationId?: Id<"conversations">,
+): Promise<void> {
+  const now = Date.now();
+  const windowMs = 10 * 60 * 1000;    type AuditDoc = Doc<"adminAuditLog">;
+  const previous: AuditDoc | null = await ctx.db
+    .query("adminAuditLog")
+    .withIndex("by_admin_target_action_created", (q) =>
+      q
+        .eq("adminUserId", adminUserId)
+        .eq("targetUserId", targetUserId)
+        .eq("action", action),
+    )
+    .order("desc")
+    .first();
+
+  if (previous !== null && now - previous.createdAt < windowMs) {
+    // Still within the de-duplication window — nothing to write.
+    return;
+  }
+
+  await ctx.db.insert("adminAuditLog", {
+    adminUserId,
+    targetUserId,
+    action,
+    createdAt: now,
+    conversationId: action === "view_ashy_chat" && conversationId
+      ? conversationId
+      : undefined,
+  });
 }

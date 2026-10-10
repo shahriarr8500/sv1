@@ -23,6 +23,11 @@ import {
   type QueryCtx,
 } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
+import { ROLES } from "./schema";
+import {
+  getEffectiveUser,
+  recordAdminAuditIfDue,
+} from "./impersonation";
 
 const TITLE_MAX = 80;
 const NAME_MAX = 60;
@@ -127,6 +132,10 @@ async function deleteMessagesCascade(
  * Cursor-paginated chat list, newest activity first (30 per page from the
  * client). Optional filters: pinned only, or everything inside one project.
  * Soft-deleted (undo-window) rows are hidden.
+ *
+ * While an admin is impersonating a student, this returns the *target's*
+ * conversations instead of the admin's own — the same effective-user helper
+ * the rest of the impersonation system uses, never a client-supplied override.
  */
 export const listConversations = query({
   args: {
@@ -135,23 +144,24 @@ export const listConversations = query({
     projectId: v.optional(v.id("projects")),
   },
   handler: async (ctx, args) => {
-    const userId = await requireUser(ctx);
+    const callerId = await requireUser(ctx);
+    const { effectiveUserId } = await getEffectiveUser(ctx, callerId);
     const builder =
       args.projectId !== undefined
         ? ctx.db
             .query("conversations")
             .withIndex("by_user_project", (q) =>
-              q.eq("userId", userId).eq("projectId", args.projectId!),
+              q.eq("userId", effectiveUserId).eq("projectId", args.projectId!),
             )
         : args.pinned !== undefined
           ? ctx.db
               .query("conversations")
               .withIndex("by_user_pinned", (q) =>
-                q.eq("userId", userId).eq("pinned", args.pinned!),
+                q.eq("userId", effectiveUserId).eq("pinned", args.pinned!),
               )
           : ctx.db
               .query("conversations")
-              .withIndex("by_user_updated", (q) => q.eq("userId", userId));
+              .withIndex("by_user_updated", (q) => q.eq("userId", effectiveUserId));
     const page = await builder.order("desc").paginate(args.paginationOpts);
     return {
       page: page.page.filter((conversation) => !conversation.deleted),
@@ -165,8 +175,14 @@ export const listConversations = query({
 export const getConversation = query({
   args: { conversationId: v.id("conversations") },
   handler: async (ctx, args) => {
-    const userId = await requireUser(ctx);
-    const conversation = await liveConversation(ctx, userId, args.conversationId);
+    const callerId = await requireUser(ctx);
+    const { effectiveUserId, isImpersonating } =
+      await getEffectiveUser(ctx, callerId);
+    const conversation = await liveConversation(
+      ctx,
+      effectiveUserId,
+      args.conversationId,
+    );
     if (!conversation) return null;
 
     const rows = await ctx.db
@@ -223,14 +239,19 @@ export const getConversation = query({
 });
 
 /**
- * Title + message-text search inside the caller's own chats only. Bounded
+ * Title + message-text search inside the effective user's chats only. Bounded
  * scan (newest 400 titles + newest 600 message rows), ≤ 20 results, each
  * with a short snippet — this never logs or returns other students' data.
+ *
+ * While an admin is impersonating, search runs against the target's chats.
+ * Search results are NOT audited per keystroke: only opening history or a
+ * specific chat writes an audit entry (see `getEffectiveUser` call sites).
  */
 export const searchConversations = query({
   args: { term: v.string() },
   handler: async (ctx, args) => {
-    const userId = await requireUser(ctx);
+    const callerId = await requireUser(ctx);
+    const { effectiveUserId } = await getEffectiveUser(ctx, callerId);
     const term = args.term.trim().toLowerCase();
     if (term.length < 2) return { results: [] };
 
@@ -246,7 +267,7 @@ export const searchConversations = query({
     // (1) Title matches first — cheap index scan.
     const conversations = await ctx.db
       .query("conversations")
-      .withIndex("by_user_updated", (q) => q.eq("userId", userId))
+      .withIndex("by_user_updated", (q) => q.eq("userId", effectiveUserId))
       .order("desc")
       .take(SEARCH_TITLE_SCAN);
     const titleById = new Map<string, Doc<"conversations">>();
@@ -268,7 +289,7 @@ export const searchConversations = query({
     // (2) Message-text matches — bounded scan of the newest messages.
     const messages = await ctx.db
       .query("ashyMessages")
-      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .withIndex("by_user", (q) => q.eq("userId", effectiveUserId))
       .order("desc")
       .take(SEARCH_MESSAGE_SCAN);
     for (const row of messages) {
@@ -299,14 +320,15 @@ export const searchConversations = query({
   },
 });
 
-/** The student's projects with live chat counts (for menus and confirms). */
+/** The effective user's projects with live chat counts (for menus and confirms). */
 export const listProjects = query({
   args: {},
   handler: async (ctx) => {
-    const userId = await requireUser(ctx);
+    const callerId = await requireUser(ctx);
+    const { effectiveUserId } = await getEffectiveUser(ctx, callerId);
     const projects = await ctx.db
       .query("projects")
-      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .withIndex("by_user", (q) => q.eq("userId", effectiveUserId))
       .order("desc")
       .take(100);
     const withCounts = await Promise.all(
@@ -314,7 +336,7 @@ export const listProjects = query({
         const conversations = await ctx.db
           .query("conversations")
           .withIndex("by_user_project", (q) =>
-            q.eq("userId", userId).eq("projectId", project._id),
+            q.eq("userId", effectiveUserId).eq("projectId", project._id),
           )
           .take(999);
         return {
@@ -889,5 +911,81 @@ export const deleteProject = mutation({
     }
     await ctx.db.delete(project._id);
     return { ok: true, affected };
+  },
+});
+
+/* -------------------------------------------------------------------------- */
+/* Admin impersonation audit (client-called, server-validated)               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Called by the Ashy page while an admin is impersonating a student when the
+ * admin first opens the Ashy history view for that target. Writes a de-duped
+ * `view_ashy_history` audit entry (once per admin + target per 10 minutes).
+ *
+ * Status/kind only — never chat titles or message content.
+ */
+export const reportAshyHistoryViewed = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const callerId = await requireUser(ctx);
+    const caller = await ctx.db.get(callerId);
+    if (caller?.role !== ROLES.ADMIN) {
+      throw new Error("Admin access required.");
+    }
+    const { effectiveUserId, isImpersonating } = await getEffectiveUser(
+      ctx,
+      callerId,
+    );
+    if (!isImpersonating) {
+      throw new Error("No impersonation session is open.");
+    }
+    await recordAdminAuditIfDue(
+      ctx,
+      callerId,
+      effectiveUserId,
+      "view_ashy_history",
+    );
+  },
+});
+
+/**
+ * Called by the Ashy page while an admin is impersonating a student when the
+ * admin opens a specific chat. Writes a de-duped `view_ashy_chat` audit entry
+ * (once per admin + target + conversation per 10 minutes) and records only the
+ * conversation id — never the title or any message content.
+ */
+export const reportAshyChatOpened = mutation({
+  args: { conversationId: v.id("conversations") },
+  handler: async (ctx, args) => {
+    const callerId = await requireUser(ctx);
+    const caller = await ctx.db.get(callerId);
+    if (caller?.role !== ROLES.ADMIN) {
+      throw new Error("Admin access required.");
+    }
+    const { effectiveUserId, isImpersonating } = await getEffectiveUser(
+      ctx,
+      callerId,
+    );
+    if (!isImpersonating) {
+      throw new Error("No impersonation session is open.");
+    }
+    // The conversation must belong to the effective (target) user; otherwise
+    // the admin is trying to audit a chat they cannot even read.
+    const conversation = await liveConversation(
+      ctx,
+      effectiveUserId,
+      args.conversationId,
+    );
+    if (!conversation) {
+      throw new Error("not-found");
+    }
+    await recordAdminAuditIfDue(
+      ctx,
+      callerId,
+      effectiveUserId,
+      "view_ashy_chat",
+      args.conversationId,
+    );
   },
 });

@@ -55,6 +55,28 @@ const schema = defineSchema(
       .index("adminUserId", ["adminUserId"])
       .index("active", ["active"]),
 
+    // Thin audit table for admin actions taken while impersonating (status-only:
+    // no message text, chat titles, project names or keys). Conversation ids are
+    // recorded only for view_ashy_chat so an admin can correlate an entry with a
+    // chat; history-view entries have no conversation id.
+    //
+    // Index is ordered with adminUserId first so the de-duplication lookup stays
+    // scoped to one admin + one target + one action, and createdAt last so the
+    // most recent entry is cheap to find.
+    adminAuditLog: defineTable({
+      adminUserId: v.id("users"),
+      targetUserId: v.id("users"),
+      action: v.string(),
+      createdAt: v.number(),
+      /** For view_ashy_chat only; empty for history-view entries. */
+      conversationId: v.optional(v.id("conversations")),
+    }).index("by_admin_target_action_created", [
+      "adminUserId",
+      "targetUserId",
+      "action",
+      "createdAt",
+    ]),
+
     // Hourly cache of identical YouTube searches made by Ashy (Phase 3), so
     // repeated "video on vectors" asks don't burn API quota. Keyed by the
     // normalized search query; entries expire after ~1 hour.
