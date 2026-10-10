@@ -101,7 +101,8 @@ type FailureKind =
   | "quota"
   | "unavailable"
   | "blocked"
-  | "invalidImage";
+  | "invalidImage"
+  | "readOnly";
 
 const FAILURE_MESSAGES: Record<FailureKind, string> = {
   unauthorized: "Ashy is only available to signed-in students.",
@@ -111,6 +112,8 @@ const FAILURE_MESSAGES: Record<FailureKind, string> = {
     "Ashy couldn't answer that. Try rephrasing your question a little.",
   invalidImage:
     "That image couldn't be read. Please attach it again as a PNG, JPEG or WebP and retry.",
+  readOnly:
+    "Viewing another student's account — Ashy is read-only right now.",
 };
 
 interface VideoSearchFailure {
@@ -325,6 +328,14 @@ export const chat = action({
       console.error("[ashy] GEMINI_API_KEY is not set on this deployment.");
       return fail("unavailable");
     }
+
+    // Read-only while an admin is viewing another student's account: no sends,
+    // no Gemini call, no YouTube search and no web search on the student's behalf.
+    const { isImpersonating: impersonating } =
+      await ctx.runQuery(internal.impersonation.getEffectiveUser, {
+        callerId: identity,
+      });
+    if (impersonating) return fail("readOnly");
 
     // --- Conversation history -------------------------------------------
     // With a conversationId the chat is persisted server-side: the outgoing

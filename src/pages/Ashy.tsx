@@ -477,7 +477,7 @@ export default function AshyPage() {
       // Report that the admin opened this target's Ashy history (server-deduped).
       void reportHistoryViewedMut({});
     }
-  }, [isImpersonating, effectiveTargetId, reportHistoryViewedMut]);
+  }, [isImpersonating, effectiveTargetId]);
 
   // Key drafts by the effective user so stopping impersonation cannot leave
   // the student's drafts behind in localStorage for the admin to see later.
@@ -487,7 +487,7 @@ export default function AshyPage() {
       // reset the active chat so a stale deep link can't be reopened.
       if (previousTargetRef.current !== null) {
         saveAshyDraft(null, null);
-        applyActiveId(null);
+        void applyActiveId(null);
         setSearchInput("");
         setSearchTerm("");
       }
@@ -497,7 +497,7 @@ export default function AshyPage() {
     if (effectiveTargetId === previousTargetRef.current) return;
     previousTargetRef.current = effectiveTargetId;
     // New target: clear the prior chat, drafts, search and pending state.
-    applyActiveId(null);
+    void applyActiveId(null);
     saveAshyDraft(null, null);
     setSearchInput("");
     setSearchTerm("");
@@ -508,7 +508,7 @@ export default function AshyPage() {
   useEffect(() => {
     if (!isImpersonating || !activeId) return;
     void reportChatOpenedMut({ conversationId: activeId });
-  }, [isImpersonating, activeId, reportChatOpenedMut]);
+  }, [isImpersonating, activeId]);
 
   /* --- URL sync + missing chats ----------------------------------------- */
 
@@ -546,10 +546,10 @@ export default function AshyPage() {
         description: "It may have been deleted. Opening a new chat.",
       });
       setChatNotFound(true);
-      applyActiveId(null);
+      void applyActiveId(null);
     }, 0);
     return () => window.clearTimeout(handle);
-  }, [conversation, activeId, applyActiveId]);
+  }, [conversation, activeId]);
 
   /* --- drafts (per conversation, memory + localStorage) ------------------ */
 
@@ -627,13 +627,13 @@ export default function AshyPage() {
     requestIdRef.current += 1; // orphan any in-flight request
     setBusy(false);
     setBusyConvId(null);
-    applyActiveId(null);
+    void applyActiveId(null);
     setDraft("");
     saveAshyDraft(null, null);
     setPendingImage(null);
     setPreviewLarge(false);
     setDrawerOpen(false);
-  }, [applyActiveId]);
+  }, []);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -775,7 +775,7 @@ export default function AshyPage() {
           conversationId = await createConversationMut({
             projectId: openProjectId ? asProjId(openProjectId) : undefined,
           });
-          applyActiveId(conversationId);
+          void applyActiveId(conversationId);
         }
 
         const userMessage: AshyMessage = {
@@ -919,12 +919,12 @@ export default function AshyPage() {
       requestIdRef.current += 1; // orphan any in-flight request
       setBusy(false);
       setBusyConvId(null);
-      applyActiveId(asConvId(id));
+      void applyActiveId(asConvId(id));
       const chat = chats.find((row) => row.id === id);
       setOpenProjectId(chat?.projectId ?? null);
       setDrawerOpen(false);
     },
-    [activeId, chats, applyActiveId],
+    [activeId, chats],
   );
 
   const renameActiveChat = useCallback(() => {
@@ -964,7 +964,7 @@ export default function AshyPage() {
 
   const deleteChat = useCallback(
     (chatId: string) => {
-      if (chatId === activeId) applyActiveId(null);
+      if (chatId === activeId) void applyActiveId(null);
       void deleteChatMut({ conversationId: asConvId(chatId) })
         .then(() => {
           toast("Chat deleted", {
@@ -981,7 +981,7 @@ export default function AshyPage() {
         })
         .catch(() => toast("Couldn't delete that chat"));
     },
-    [activeId, applyActiveId, deleteChatMut, restoreChatMut],
+    [activeId, deleteChatMut, restoreChatMut],
   );
 
   const createProject = useCallback(

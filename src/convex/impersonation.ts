@@ -1,22 +1,14 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
-import type { GenericMutationCtx, GenericQueryCtx } from "convex/server";
+import type {
+  GenericMutationCtx,
+  GenericQueryCtx,
+} from "convex/server";
 import { v } from "convex/values";
 import type { DataModel, Doc, Id } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
 import { ROLES } from "./schema";
 
-/**
- * Admin impersonation — "log in as" any account.
- *
- * Only an account holding the `admin` role can open a session, and that role is
- * re-checked on the server for every call rather than trusted from the client.
- * Each session is recorded in the `impersonations` table and marked ended when
- * it stops, so there is a permanent record of who opened whose account and when.
- *
- * While a session is open the app renders the *target's* dashboard state and
- * writes are routed back to the target, so the admin sees exactly what that
- * student sees.
- */
+/**\n * Admin impersonation — "log in as" any account.\n *\n * Only an account holding the `admin` role can open a session, and that role is\n * re-checked on the server for every call rather than trusted from the client.\n * Each session is recorded in the `impersonations` table and marked ended when\n * it stops, so there is a permanent record of who opened whose account and when.\n *\n * While a session is open the app renders the *target's* dashboard state and\n * writes are routed back to the target, so the admin sees exactly what that\n * student sees.\n */
 
 type AnyCtx = GenericQueryCtx<DataModel> | GenericMutationCtx<DataModel>;
 
@@ -106,10 +98,7 @@ export const stop = mutation({
   },
 });
 
-/**
- * The caller's open session, if any, plus the target's identity. Returns
- * `{ active: false }` for everyone else, so this is safe to call on every page.
- */
+/**\n * The caller's open session, if any, plus the target's identity. Returns\n * `{ active: false }` for everyone else, so this is safe to call on every page.\n */
 export const active = query({
   args: {},
   handler: async (ctx) => {
@@ -136,10 +125,7 @@ export const active = query({
   },
 });
 
-/**
- * The target's dashboard state, so the app can render their screens while the
- * admin is signed in as them. Requires an open session on this account.
- */
+/**\n * The target's dashboard state, so the app can render their screens while the\n * admin is signed in as them. Requires an open session on this account.\n */
 export const targetState = query({
   args: {},
   handler: async (ctx) => {
@@ -158,10 +144,9 @@ export const targetState = query({
       updatedAt: progress.updatedAt,
     };
   },
-});/**
- * Writes made while impersonating go to the target instead of the admin's own
- * account, so progress changes land on the student whose session is open.
- */
+});
+
+/**\n * Writes made while impersonating go to the target instead of the admin's own\n * account, so progress changes land on the student whose session is open.\n */
 export async function resolveWriteTarget(
   ctx: AnyCtx,
   callerId: Id<"users">,
@@ -172,20 +157,7 @@ export async function resolveWriteTarget(
   return grant?.targetUserId ?? callerId;
 }
 
-/**
- * One backend helper for Ashy (and any future feature) that needs to resolve
- * the account whose data should be read while impersonation is active.
- *
- * Normal users always get their own id. An admin who has an open session gets
- * the target user id (after the target actually exists in the DB). An admin
- * with no open session, or a client that supplies an override it is not
- * entitled to, gets its own id — the override is ignored rather than trusted.
- *
- * Callers pass their own auth id (from `getAuthUserId`) as `callerId` and may
- * optionally supply the target id the client wants to view. The backend is the
- * only place the override is honored, and only after the admin role is
- * re-checked from the DB.
- */
+/**\n * One backend helper for Ashy (and any future feature) that needs to resolve\n * the account whose data should be read while impersonation is active.\n *\n * Normal users always get their own id. An admin who has an open session gets\n * the target user id (after the target actually exists in the DB). An admin\n * with no open session, or a client that supplies an override it is not\n * entitled to, gets its own id — the override is ignored rather than trusted.\n *\n * Callers pass their own auth id (from `getAuthUserId`) as `callerId` and may\n * optionally supply the target id the client wants to view. The backend is the\n * only place the override is honored, and only after the admin role is\n * re-checked from the DB.\n *\n * This is a plain helper (not a Convex function) so it can be called directly\n * from any Convex server context — queries, mutations and actions — without\n * going through runQuery/runMutation and without needing it to be present in\n * the generated API.\n */
 export async function getEffectiveUser(
   ctx: AnyCtx,
   callerId: Id<"users">,
@@ -223,22 +195,7 @@ export async function getEffectiveUser(
   return { effectiveUserId: grant.targetUserId, isImpersonating: true };
 }
 
-/**
- * Write an audit entry, de-duplicated so one admin session does not write
- * hundreds of entries while the student's chats are being scrolled.
- *
- * - `view_ashy_history`: once per (admin, target) per 10 minutes.
- * - `view_ashy_chat`: once per (admin, target, conversation) per 10 minutes.
- *
- * When the de-duplication window is still open the call is a no-op. When it
- * has elapsed, a new entry is inserted. No message text, chat titles, project
- * names or keys are ever stored — only the conversation id for
- * `view_ashy_chat`, and only status/kind tokens elsewhere.
- *
- * This function must be called from a mutation/action (a context that supports
- * writes), never from a plain query, because it inserts into
- * `adminAuditLog`.
- */
+/**\n * Write an audit entry, de-duplicated so one admin session does not write\n * hundreds of entries while the student's chats are being scrolled.\n *\n * - `view_ashy_history`: once per (admin, target) per 10 minutes.\n * - `view_ashy_chat`: once per (admin, target, conversation) per 10 minutes.\n *\n * When the de-duplication window is still open the call is a no-op. When it\n * has elapsed, a new entry is inserted. No message text, chat titles, project\n * names or keys are ever stored — only the conversation id for\n * `view_ashy_chat`, and only status/kind tokens elsewhere.\n *\n * This function must be called from a mutation/action (a context that supports\n * writes), never from a plain query, because it inserts into\n * `adminAuditLog`.\n */
 export async function recordAdminAuditIfDue(
   ctx: GenericMutationCtx<DataModel>,
   adminUserId: Id<"users">,
@@ -247,7 +204,9 @@ export async function recordAdminAuditIfDue(
   conversationId?: Id<"conversations">,
 ): Promise<void> {
   const now = Date.now();
-  const windowMs = 10 * 60 * 1000;    type AuditDoc = Doc<"adminAuditLog">;
+  const windowMs = 10 * 60 * 1000;
+
+  type AuditDoc = Doc<"adminAuditLog">;
   const previous: AuditDoc | null = await ctx.db
     .query("adminAuditLog")
     .withIndex("by_admin_target_action_created", (q) =>

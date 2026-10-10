@@ -13,7 +13,8 @@ export type AshyFailureKind =
   | "quota"
   | "unavailable"
   | "blocked"
-  | "invalidImage";
+  | "invalidImage"
+  | "readOnly";
 
 export interface AshyImage {
   /** MIME type: image/png, image/jpeg, image/webp, image/gif. */
@@ -95,6 +96,8 @@ export const ASHY_FAILURE_COPY: Record<AshyFailureKind, string> = {
   blocked: "Ashy couldn't answer that. Try rephrasing your question a little.",
   invalidImage:
     "That image couldn't be read. Please attach it again as a PNG, JPEG or WebP and retry.",
+  readOnly:
+    "Viewing another student's account — Ashy is read-only right now.",
 };
 
 export function newId(): string {
@@ -264,7 +267,7 @@ export const ASHY_DEFAULT_PREFS: AshyPrefs = {
 };
 
 const PREFS_KEY = "ashy:prefs";
-const DRAFTS_KEY = "ashy:drafts";
+export const DRAFTS_KEY = "ashy:drafts";
 const PANEL_KEY = "ashy:panel-open";
 
 function readJson(key: string): unknown {
