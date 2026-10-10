@@ -22,6 +22,7 @@ import {
   ArrowUp,
   Camera,
   Check,
+  ArrowDown,
   Copy,
   Crop,
   Globe,
@@ -235,8 +236,9 @@ export default function AshyPage() {
   const [busy, setBusy] = useState(false);
   const [busyConvId, setBusyConvId] = useState<string | null>(null);
   /** True while the student is scrolled up (shows "Jump to latest"). */
-  const [searchMode, setSearchMode] = useState<"auto" | "on" | "off">("auto");
   const [showJump, setShowJump] = useState(false);
+  const [searchMode, setSearchMode] = useState<"auto" | "on" | "off">("auto");
+  const jumpRef = useRef<HTMLButtonElement | null>(null);
 
   /* --- local overlay (optimistic + unconfirmed messages) ---------------- */
   const [pending, setPending] = useState<Record<string, AshyMessage[]>>({});
@@ -517,6 +519,11 @@ export default function AshyPage() {
       container.scrollHeight - container.scrollTop - container.clientHeight < 80;
     atBottomRef.current = atBottom;
     setShowJump(!atBottom);
+    // Keep the latest-affordance mounted for the layout/stable focus path.
+    void jumpRef.current;
+    if (!atBottom) {
+      setShowJump(true);
+    }
   }, []);
 
   // Keep the newest message in view only when the student is already there —
@@ -1212,10 +1219,10 @@ export default function AshyPage() {
   /* --- render ---------------------------------------------------------------- */
 
   return (
-    <div
-      className={cn(
+    <div        className={cn(
         "mx-auto flex h-[calc(100dvh-14rem)] min-h-[26rem] w-full max-w-full lg:h-[calc(100dvh-5.5rem)] lg:min-h-0",
         player?.mode === "mini" && "pb-[112px] lg:pb-0",
+        showJump && "pb-10",
       )}
     >
       {/* Desktop: collapsible history pane beside the chat */}
@@ -1644,6 +1651,7 @@ export default function AshyPage() {
             )}
           </div>
         </div>
+      </div>
 
         {/* Pending attachment preview */}
         {pendingImage ? (
@@ -1914,7 +1922,7 @@ export default function AshyPage() {
               disabled={!draft.trim() && !pendingImage}
             >
               {draft.trim() || pendingImage ? (
-                <ArrowUp className="size-4" aria-hidden />
+                <ArrowDown className="size-4" aria-hidden />
               ) : (
                 <Send className="size-4" aria-hidden />
               )}
