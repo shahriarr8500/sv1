@@ -10,6 +10,7 @@
 
 import type * as admin from "../admin.js";
 import type * as ashy from "../ashy.js";
+import type * as ashyConversations from "../ashyConversations.js";
 import type * as ashyData from "../ashyData.js";
 import type * as ashyPlanning from "../ashyPlanning.js";
 import type * as ashyResources from "../ashyResources.js";
@@ -30,6 +31,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   admin: typeof admin;
   ashy: typeof ashy;
+  ashyConversations: typeof ashyConversations;
   ashyData: typeof ashyData;
   ashyPlanning: typeof ashyPlanning;
   ashyResources: typeof ashyResources;

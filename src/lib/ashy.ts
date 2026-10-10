@@ -1,9 +1,11 @@
 /**
- * Ashy client helpers — types, history building, and voice utilities.
+ * Ashy client helpers — types, local preferences/drafts, and voice
+ * utilities.
  *
- * The conversation lives entirely in the Ashy page for V1 (a reliable
- * current-session history rather than a backend chat store), so this module
- * only holds pure helpers shared by the page and its components.
+ * Conversations themselves are persisted in Convex (src/convex/
+ * ashyConversations.ts) and loaded reactively; this module only holds the
+ * pure helpers and local-only state (settings, drafts) the page shares with
+ * its components.
  */
 
 export type AshyFailureKind =
@@ -16,8 +18,10 @@ export type AshyFailureKind =
 export interface AshyImage {
   /** MIME type: image/png, image/jpeg, image/webp, image/gif. */
   mimeType: string;
-  /** Base64 payload WITHOUT the data: prefix. */
-  data: string;
+  /** Base64 payload WITHOUT the data: prefix (local, unsent images). */
+  data?: string;
+  /** Storage URL for a saved image (messages loaded from the server). */
+  url?: string | null;
 }
 
 export interface AshyMessage {
@@ -118,8 +122,16 @@ export function buildHistory(
       role: message.role === "user" ? "user" : "model",
       text: message.text,
     };
-    if (message.images && message.images.length > 0) {
-      turn.images = message.images;
+    // Only local base64 images can be sent — stored images are hydrated
+    // server-side.
+    const localImages = (message.images ?? []).filter(
+      (image) => typeof image.data === "string" && image.data.length > 0,
+    );
+    if (localImages.length > 0) {
+      turn.images = localImages.map((image) => ({
+        mimeType: image.mimeType,
+        data: image.data as string,
+      }));
     }
     return turn;
   });
@@ -148,6 +160,190 @@ export function toSpeechText(markdown: string): string {
     .replace(/[*_~|]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+/* -------------------------------------------------------------------------- */
+/* Chat list / projects (client-side shapes for the history panel)            */
+/* -------------------------------------------------------------------------- */
+
+export interface AshyChatRow {
+  id: string;
+  title: string;
+  pinned: boolean;
+  projectId: string | null;
+  updatedAt: number;
+  messageCount: number;
+}
+
+export interface AshyProjectRow {
+  id: string;
+  name: string;
+  emoji?: string;
+  instructions?: string;
+  chatCount: number;
+}
+
+export interface AshySearchHit {
+  conversationId: string;
+  title: string;
+  snippet: string;
+  matchedIn: "title" | "message";
+}
+
+/** One entry of the history panel's date-grouped chat list. */
+export interface AshyChatGroup {
+  label: string;
+  chats: AshyChatRow[];
+}
+
+/** Today / Yesterday / Previous 7 days / Previous 30 days / Older. */
+export function groupChatsByDate(
+  chats: AshyChatRow[],
+  now = Date.now(),
+): AshyChatGroup[] {
+  const day = 24 * 60 * 60 * 1000;
+  const startOfToday = new Date(now);
+  startOfToday.setHours(0, 0, 0, 0);
+  const todayStart = startOfToday.getTime();
+  const groups: AshyChatGroup[] = [
+    { label: "Today", chats: [] },
+    { label: "Yesterday", chats: [] },
+    { label: "Previous 7 days", chats: [] },
+    { label: "Previous 30 days", chats: [] },
+    { label: "Older", chats: [] },
+  ];
+  for (const chat of chats) {
+    if (chat.updatedAt >= todayStart) groups[0].chats.push(chat);
+    else if (chat.updatedAt >= todayStart - day) groups[1].chats.push(chat);
+    else if (chat.updatedAt >= todayStart - 7 * day) groups[2].chats.push(chat);
+    else if (chat.updatedAt >= todayStart - 30 * day) groups[3].chats.push(chat);
+    else groups[4].chats.push(chat);
+  }
+  return groups.filter((group) => group.chats.length > 0);
+}
+
+/** Highlight the search term inside a snippet (used by the panel). */
+export function highlightMatch(
+  text: string,
+  term: string,
+): Array<{ chunk: string; hit: boolean }> {
+  const clean = term.trim().toLowerCase();
+  if (!clean) return [{ chunk: text, hit: false }];
+  const parts: Array<{ chunk: string; hit: boolean }> = [];
+  const lower = text.toLowerCase();
+  let index = 0;
+  while (index < text.length) {
+    const found = lower.indexOf(clean, index);
+    if (found === -1) {
+      parts.push({ chunk: text.slice(index), hit: false });
+      break;
+    }
+    if (found > index) parts.push({ chunk: text.slice(index, found), hit: false });
+    parts.push({ chunk: text.slice(found, found + clean.length), hit: true });
+    index = found + clean.length;
+  }
+  return parts;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Local preferences and drafts (localStorage, never sensitive)               */
+/* -------------------------------------------------------------------------- */
+
+export interface AshyPrefs {
+  textSize: "sm" | "md" | "lg";
+  density: "comfortable" | "compact";
+  answerLength: "concise" | "balanced" | "detailed";
+  enterToSend: boolean;
+}
+
+export const ASHY_DEFAULT_PREFS: AshyPrefs = {
+  textSize: "md",
+  density: "comfortable",
+  answerLength: "balanced",
+  enterToSend: true,
+};
+
+const PREFS_KEY = "ashy:prefs";
+const DRAFTS_KEY = "ashy:drafts";
+const PANEL_KEY = "ashy:panel-open";
+
+function readJson(key: string): unknown {
+  try {
+    const raw = window.localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as unknown) : null;
+  } catch {
+    return null; // private mode / quota / disabled storage
+  }
+}
+
+function writeJson(key: string, value: unknown): void {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // A storage hiccup must never break the chat.
+  }
+}
+
+export function loadAshyPrefs(): AshyPrefs {
+  const stored = readJson(PREFS_KEY) as Partial<AshyPrefs> | null;
+  if (!stored || typeof stored !== "object") return { ...ASHY_DEFAULT_PREFS };
+  return {
+    textSize: stored.textSize === "sm" || stored.textSize === "lg" ? stored.textSize : "md",
+    density: stored.density === "compact" ? "compact" : "comfortable",
+    answerLength:
+      stored.answerLength === "concise" || stored.answerLength === "detailed"
+        ? stored.answerLength
+        : "balanced",
+    enterToSend: stored.enterToSend !== false,
+  };
+}
+
+export function saveAshyPrefs(prefs: AshyPrefs): void {
+  writeJson(PREFS_KEY, prefs);
+}
+
+export interface AshyDraft {
+  text: string;
+  /** Cropped attachment data-url kept for the conversation being drafted. */
+  imageData?: string;
+}
+
+function draftKey(conversationId: string | null): string {
+  return conversationId ?? "new";
+}
+
+export function loadAshyDraft(conversationId: string | null): AshyDraft | null {
+  const all = readJson(DRAFTS_KEY) as Record<string, AshyDraft> | null;
+  const draft = all?.[draftKey(conversationId)];
+  if (!draft || typeof draft.text !== "string") return null;
+  return { text: draft.text, imageData: draft.imageData };
+}
+
+export function saveAshyDraft(
+  conversationId: string | null,
+  draft: AshyDraft | null,
+): void {
+  const all = (readJson(DRAFTS_KEY) as Record<string, AshyDraft> | null) ?? {};
+  if (draft && (draft.text || draft.imageData)) all[draftKey(conversationId)] = draft;
+  else delete all[draftKey(conversationId)];
+  writeJson(DRAFTS_KEY, all);
+}
+
+export function loadAshyPanelOpen(): boolean {
+  try {
+    const raw = window.localStorage.getItem(PANEL_KEY);
+    return raw === null ? true : raw === "1";
+  } catch {
+    return true;
+  }
+}
+
+export function saveAshyPanelOpen(open: boolean): void {
+  try {
+    window.localStorage.setItem(PANEL_KEY, open ? "1" : "0");
+  } catch {
+    // Preference only — ignore storage failures.
+  }
 }
 
 /* -------------------------------------------------------------------------- */
