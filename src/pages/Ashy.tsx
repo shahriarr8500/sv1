@@ -19,7 +19,6 @@ import { Link, useSearchParams } from "react-router";
 import { toast } from "sonner";
 import {
   AlertTriangle,
-  ArrowDown,
   ArrowUp,
   Camera,
   Check,
@@ -186,10 +185,10 @@ function WelcomeScreen({ onPick }: { onPick: (prompt: string) => void }) {
             {prompt}
           </button>
         ))}
-      </div>
-    </div>
+      </div>      </div>
   );
 }
+
 
 /* -------------------------------------------------------------------------- */
 /* Page                                                                        */
@@ -236,8 +235,8 @@ export default function AshyPage() {
   const [busy, setBusy] = useState(false);
   const [busyConvId, setBusyConvId] = useState<string | null>(null);
   /** True while the student is scrolled up (shows "Jump to latest"). */
-  const [showJump, setShowJump] = useState(false);
   const [searchMode, setSearchMode] = useState<"auto" | "on" | "off">("auto");
+  const [showJump, setShowJump] = useState(false);
 
   /* --- local overlay (optimistic + unconfirmed messages) ---------------- */
   const [pending, setPending] = useState<Record<string, AshyMessage[]>>({});
@@ -1215,19 +1214,20 @@ export default function AshyPage() {
   return (
     <div
       className={cn(
-        "mx-auto flex h-[calc(100dvh-14rem)] min-h-[26rem] w-full max-w-full gap-4 lg:h-[calc(100dvh-9rem)] lg:gap-6",
-        player?.mode === "mini" && "pb-[112px] xl:pb-0",
+        "mx-auto flex h-[calc(100dvh-14rem)] min-h-[26rem] w-full max-w-full lg:h-[calc(100dvh-5.5rem)] lg:min-h-0",
+        player?.mode === "mini" && "pb-[112px] lg:pb-0",
       )}
     >
-      {/* Desktop: collapsible history panel beside the chat */}
+      {/* Desktop: collapsible history pane beside the chat */}
       {panelOpen ? (
-        <aside className="hidden w-[292px] shrink-0 lg:block">
+        <aside className="hidden lg:flex lg:flex-col lg:w-[300px] lg:min-w-0 lg:flex-shrink-0 lg:border-r lg:border-border lg:bg-muted/40 lg:transition-[width] lg:duration-200">
           <HistoryPanel ref={desktopPanelRef} variant="desktop" {...panelProps} />
         </aside>
-      ) : null}
+      ) : (
+        <div className="hidden lg:block lg:w-[12px]" aria-hidden="true" />
+      )}
 
-      {/* Mobile: full-height left drawer (always mounted, keeps its
-          scroll position; backdrop tap or Escape closes it) */}
+      {/* Mobile: full-height left drawer */}
       <div
         className={cn(
           "fixed inset-0 z-50 lg:hidden",
@@ -1269,8 +1269,8 @@ export default function AshyPage() {
         </div>
       </div>
 
-      {/* Chat column */}
-      <div className="mx-auto flex h-full w-full min-w-0 max-w-3xl flex-col">
+      {/* Chat pane */}
+      <div className="mx-auto flex h-full w-full min-w-0 flex-1 flex-col lg:max-w-[calc(100%-12px)] lg:mr-auto lg:flex-[1]">
         <ChatHeader
           title={title}
           hasChat={hasChat}
@@ -1332,14 +1332,17 @@ export default function AshyPage() {
           </div>
         ) : null}
 
-        {/* Messages */}
-        <div className="relative min-h-0 flex-1">
+        {/* Message area: full-width pane scrollbar, centered message column */}
+        <div className="relative flex min-h-0 flex-1 flex-col">
           <div
             ref={scrollRef}
             onScroll={handleScroll}
-            className={cn("h-full overflow-y-auto", prefs.density === "compact" ? "py-2" : "py-4")}
+            className={cn(
+              "flex-1 overflow-y-auto px-6" + (prefs.density === "compact" ? " py-2" : " py-4"),
+            )}
           >
-            {conversationLoading ? (
+            <div className="mx-auto w-full max-w-[820px] lg:max-w-[920px]">
+              {conversationLoading ? (
               <div className="space-y-4">
                 {[0, 1, 2].map((index) => (
                   <div key={index} className="flex items-start gap-3">
@@ -1640,26 +1643,6 @@ export default function AshyPage() {
               </ul>
             )}
           </div>
-
-          {/* Scroll to latest (only after scrolling up) */}
-          {showJump && messages.length > 0 ? (
-            <button
-              type="button"
-              onClick={() => {
-                const container = scrollRef.current;
-                if (!container) return;
-                atBottomRef.current = true;
-                container.scrollTo({
-                  top: container.scrollHeight,
-                  behavior: "smooth",
-                });
-              }}
-              className="absolute bottom-3 left-1/2 flex -translate-x-1/2 cursor-pointer items-center gap-1.5 rounded-full border bg-card px-3 py-1.5 text-xs text-muted-foreground shadow-md transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-            >
-              <ArrowDown className="size-3.5" aria-hidden />
-              Jump to latest
-            </button>
-          ) : null}
         </div>
 
         {/* Pending attachment preview */}
@@ -2127,3 +2110,5 @@ export default function AshyPage() {
     </div>
   );
 }
+
+
