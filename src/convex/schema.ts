@@ -79,7 +79,25 @@ const schema = defineSchema(
       userId: v.id("users"),
       day: v.string(),
       groundedCount: v.number(),
+      /** Tavily backup-search attempts today (per-user constant cap). */
+      tavilyCount: v.optional(v.number()),
     }).index("userId_day", ["userId", "day"]),
+
+    // Backup link-search cache (Tavily results for identical queries,
+    // ~45 minutes). Keyed by the normalized query.
+    ashyLinkCache: defineTable({
+      key: v.string(),
+      results: v.array(
+        v.object({
+          title: v.string(),
+          url: v.string(),
+          domain: v.string(),
+          snippet: v.optional(v.string()),
+        }),
+      ),
+      createdAt: v.number(),
+      expiresAt: v.number(),
+    }).index("key", ["key"]),
 
     // tableName: defineTable({
     //   ...
