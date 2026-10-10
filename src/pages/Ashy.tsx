@@ -19,7 +19,6 @@ import { Link, useSearchParams } from "react-router";
 import { toast } from "sonner";
 import {
   AlertTriangle,
-  ArrowUp,
   Camera,
   Check,
   ArrowDown,
