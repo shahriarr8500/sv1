@@ -7,11 +7,47 @@
  * lists and code blocks are styled to the Student OS theme.
  */
 
+import { useRef, useState } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
+
+/** A fenced code block with its own copy button (never a page-wide scroll). */
+function CodeBlock({ children }: { children?: React.ReactNode }) {
+  const ref = useRef<HTMLPreElement | null>(null);
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="relative my-3">
+      <pre
+        ref={ref}
+        className="overflow-x-auto rounded-lg border bg-muted/60 p-3 pr-14 text-xs leading-relaxed"
+      >
+        {children}
+      </pre>
+      <button
+        type="button"
+        aria-label="Copy code"
+        onClick={() => {
+          const text = ref.current?.textContent ?? "";
+          navigator.clipboard
+            .writeText(text)
+            .then(() => {
+              setCopied(true);
+              window.setTimeout(() => setCopied(false), 1500);
+            })
+            .catch(() => {
+              // Clipboard blocked — the student can select the text manually.
+            });
+        }}
+        className="absolute top-1.5 right-1.5 cursor-pointer rounded-md border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+      >
+        {copied ? "Copied" : "Copy"}
+      </button>
+    </div>
+  );
+}
 
 const components: Components = {
   h1: ({ children }) => (
@@ -68,11 +104,7 @@ const components: Components = {
     </blockquote>
   ),
   hr: () => <hr className="my-4 border-border" />,
-  pre: ({ children }) => (
-    <pre className="my-3 overflow-x-auto rounded-lg border bg-muted/60 p-3 text-xs leading-relaxed">
-      {children}
-    </pre>
-  ),
+  pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
   code: ({ className, children }) => {
     const isBlock = /language-/.test(className ?? "");
     if (isBlock) {

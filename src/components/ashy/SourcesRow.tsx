@@ -3,7 +3,8 @@
  *
  * Shows a "Searched the web" indicator with the queries Gemini ran
  * (collapsible), Google's Search-suggestions link when the API returned one,
- * and a horizontally scrollable row of compact source cards. Every link opens
+ * and a wrapping grid of compact source cards (one column on phones, two on
+ * wider screens — no horizontal scrolling). Every link opens
  * in a new tab with rel="noopener noreferrer"; only titles and URLs stored on
  * the message are ever rendered — never raw provider HTML.
  */
@@ -86,13 +87,13 @@ export function SourcesRow({
         <div
           role="list"
           aria-label="Sources"
-          className="flex gap-2 overflow-x-auto pb-1"
+          className="grid grid-cols-1 gap-2 sm:grid-cols-2"
         >
           {sources.map((source, index) => (
             <div
               role="listitem"
               key={source.url}
-              className="flex w-44 shrink-0 flex-col justify-between gap-1.5 rounded-lg border bg-card p-2"
+              className="flex min-w-0 flex-col justify-between gap-1.5 rounded-lg border bg-card p-2"
             >
               <p className="line-clamp-2 text-[11px] leading-snug font-medium">
                 <span className="text-primary">[{index + 1}]</span> {source.title}
