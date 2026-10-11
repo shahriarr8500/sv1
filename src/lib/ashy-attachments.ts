@@ -306,14 +306,25 @@ export type PdfCheck = { ok: true } | { ok: false; reason: PdfRejectionReason };
 
 export const PDF_REJECTION_COPY: Record<PdfRejectionReason, string> = {
   empty: "That PDF file is empty. Please choose another file.",
-  tooLarge: "That PDF is over the 6 MB limit. Try a smaller file, or ask about specific pages instead.",
+  tooLarge:
+    "That PDF is too large even to open here (over 60 MB). Try splitting it, or exporting a smaller version of the pages you need.",
   notPdf:
     "That file couldn't be opened as a PDF — it may be corrupt, or not really a PDF. Please re-export it and try again.",
   encrypted:
     "That PDF is password-protected. Remove the password (re-export it without one) and upload it again.",
   tooManyPages:
-    "That PDF has more than 80 pages. Open it and ask about a page range instead — Ashy reads selected pages at a time.",
+    "That PDF has more than 80 pages, so it can't be sent whole. Ashy can still open it as a read-only copy so you can ask about a page range at a time.",
 };
+
+/**
+ * Shown when an oversized document is opened as a LOCAL read-only copy:
+ * the file stays on the student's device (a blob URL, never uploaded), and
+ * questions are asked through selected rendered pages instead.
+ */
+export const PDF_LOCAL_ONLY_NOTICE = {
+  title: "Opened as a read-only copy",
+  body: `This PDF is too large to attach, so it isn't uploaded. You can still read it here and ask Ashy about up to ${MAX_SELECTED_PAGES} pages at a time — Ashy reads exactly the pages you select.`,
+} as const;
 
 function bytesIndexOf(
   haystack: Uint8Array,
@@ -391,6 +402,79 @@ export function validatePdfAttachment(
   if (pdf.data.length === 0) return { ok: false, reason: "empty" };
   if (pdf.data.length > MAX_PDF_CHARS) return { ok: false, reason: "tooLarge" };
   return validatePdfBytes(decodeBase64(pdf.data), pdf.size);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Upload disposition — attach, open locally, or reject                        */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Hard ceiling for the LOCAL read-only reader path. Files up to this size
+ * can be opened in the browser's PDF reader and answered page-by-page (the
+ * bytes never leave the device); anything larger is rejected outright —
+ * even loading it locally would risk freezing a phone browser.
+ */
+export const MAX_LOCAL_PDF_BYTES = 60 * 1024 * 1024;
+
+/**
+ * What the composer should do with a picked file:
+ * - `attach`     — within every budget: validate, upload with the message.
+ * - `localOnly`  — over the attach budget but still readable locally: open
+ *                  as a read-only copy (blob URL), never uploaded; questions
+ *                  go through rendered selected pages.
+ * - `reject`     — not a real PDF, encrypted, empty, or too large to even
+ *                  open locally.
+ *
+ * Order matters: the bytes must be a real, unencrypted PDF BEFORE any
+ * size-based fallback, so a huge non-PDF can never reach the reader.
+ */
+export type PdfUploadDisposition =
+  | { action: "attach" }
+  | { action: "localOnly"; reason: "tooLarge" | "tooManyPages" }
+  | { action: "reject"; reason: PdfRejectionReason };
+
+export function pdfUploadDisposition(
+  bytes: Uint8Array,
+  declaredSize?: number,
+): PdfUploadDisposition {
+  const size = declaredSize ?? bytes.length;
+  if (bytes.length === 0 || size === 0) {
+    return { action: "reject", reason: "empty" };
+  }
+  if (!hasPdfSignature(bytes)) return { action: "reject", reason: "notPdf" };
+  if (isEncryptedPdf(bytes)) return { action: "reject", reason: "encrypted" };
+  if (bytes.length > MAX_LOCAL_PDF_BYTES || size > MAX_LOCAL_PDF_BYTES) {
+    return { action: "reject", reason: "tooLarge" };
+  }
+  const overAttachSize =
+    bytes.length > MAX_PDF_BYTES || size > MAX_PDF_BYTES;
+  if (overAttachSize) return { action: "localOnly", reason: "tooLarge" };
+  if (countPdfPageMarkers(bytes) > MAX_PDF_PAGES) {
+    return { action: "localOnly", reason: "tooManyPages" };
+  }
+  return { action: "attach" };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Attachment markers — page/document identity on the wire                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Bracket markers appended to the outgoing message text so the model (and
+ * the student, in the chat bubble) can see exactly which document and which
+ * pages are attached. Same visual language the history builder already uses
+ * for older turns (`[Attached document: …]`), which is what makes honest
+ * page citations possible: the model cites only pages it was actually given.
+ */
+export function documentAttachmentMarker(name: string): string {
+  return `[Attached document: ${sanitizePdfName(name)}]`;
+}
+
+export function pagesAttachmentMarker(label: string): string {
+  // The viewer builds labels like "Page 3 of notes.pdf" /
+  // "Pages 2–4 of notes.pdf" — bounded and already sanitized upstream.
+  const clean = label.replace(/[\u0000-\u001f]/g, "").trim().slice(0, 160);
+  return `[Attached: ${clean || "selected pages"}]`;
 }
 
 /** Display filename: path-free, bounded, never empty. */

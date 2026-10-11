@@ -11,23 +11,31 @@
  */
 
 import {
+  MAX_LOCAL_PDF_BYTES,
   MAX_PDF_BYTES,
   MAX_PDF_CHARS,
   MAX_PDF_PAGES,
   MAX_PDFS_PER_MESSAGE,
   MAX_SELECTED_PAGES,
+  PDF_LOCAL_ONLY_NOTICE,
   PDF_MIME_TYPE,
   PDF_REJECTION_COPY,
   clampPageRange,
   countPdfPageMarkers,
   decodeBase64,
+  documentAttachmentMarker,
   hasPdfSignature,
   isEncryptedPdf,
+  pagesAttachmentMarker,
+  pdfUploadDisposition,
   sanitizePdfName,
   validatePdfAttachment,
   validatePdfBytes,
 } from "../lib/ashy-attachments";
-import { TRANSCRIPTION_INSTRUCTION } from "../convex/ashyShared";
+import {
+  DOCUMENT_INSTRUCTION,
+  TRANSCRIPTION_INSTRUCTION,
+} from "../convex/ashyShared";
 import { ASHY_FAILURE_COPY, buildHistory, type AshyMessage } from "../lib/ashy";
 
 let checks = 0;
@@ -339,6 +347,191 @@ assert(
 assert(
   turns[2].images === undefined,
   "client turns never re-send stored PDF bytes (hydrated server-side only)",
+);
+
+/* -------------------------------------------------------------------------- */
+/* 11. Upload disposition — attach vs local read-only copy vs reject          */
+/* -------------------------------------------------------------------------- */
+
+assert(MAX_LOCAL_PDF_BYTES === 60 * 1024 * 1024, "local reader ceiling is exactly 60 MB");
+
+// Zero-filled buffers of a given size with a real PDF header — no giant
+// strings, no base64, just enough bytes for the disposition decision.
+function fakePdfOfSize(totalBytes: number): Uint8Array {
+  const bytes = new Uint8Array(totalBytes);
+  bytes.set(textBytes(ASCII_PDF_HEADER), 0);
+  return bytes;
+}
+const OVER_ATTACH_PDF = fakePdfOfSize(MAX_PDF_BYTES + 16); // 6 MB + ε
+const OVER_LOCAL_PDF = fakePdfOfSize(MAX_LOCAL_PDF_BYTES + 16); // 60 MB + ε
+
+assert(
+  pdfUploadDisposition(VALID_PDF, VALID_PDF.length).action === "attach",
+  "a valid small PDF is attached normally",
+);
+const dispBig = pdfUploadDisposition(OVER_ATTACH_PDF, OVER_ATTACH_PDF.length);
+assert(
+  dispBig.action === "localOnly" && dispBig.reason === "tooLarge",
+  "a real PDF over the attach cap becomes a local read-only copy",
+);
+const dispHuge = pdfUploadDisposition(OVER_LOCAL_PDF, OVER_LOCAL_PDF.length);
+assert(
+  dispHuge.action === "reject" && dispHuge.reason === "tooLarge",
+  "a real PDF over the local ceiling is rejected outright",
+);
+const dispPages = pdfUploadDisposition(manyPages, manyPages.length);
+assert(
+  dispPages.action === "localOnly" && dispPages.reason === "tooManyPages",
+  "an over-page-budget PDF becomes a local read-only copy, not a dead end",
+);
+const dispEncrypted = pdfUploadDisposition(ENCRYPTED_PDF, ENCRYPTED_PDF.length);
+assert(
+  dispEncrypted.action === "reject" && dispEncrypted.reason === "encrypted",
+  "encrypted PDFs are rejected before any size fallback",
+);
+const dispGarbage = pdfUploadDisposition(GARBAGE, GARBAGE.length);
+assert(
+  dispGarbage.action === "reject" && dispGarbage.reason === "notPdf",
+  "non-PDF bytes are rejected before any size fallback",
+);
+const dispEmpty = pdfUploadDisposition(EMPTY, 0);
+assert(
+  dispEmpty.action === "reject" && dispEmpty.reason === "empty",
+  "empty files are rejected",
+);
+// A declared size can lie: bytes still rule, size still caps.
+assert(
+  pdfUploadDisposition(VALID_PDF, MAX_PDF_BYTES + 1).action === "localOnly",
+  "a lying declared size over the attach cap downgrades to local-only",
+);
+assert(
+  pdfUploadDisposition(VALID_PDF, MAX_LOCAL_PDF_BYTES + 1).action === "reject",
+  "a lying declared size over the local ceiling rejects",
+);
+// A huge NON-PDF can never reach the reader, whatever its size.
+const hugeGarbage = new Uint8Array(MAX_LOCAL_PDF_BYTES + 16);
+hugeGarbage.set(textBytes("not a pdf at all"), 0);
+assert(
+  pdfUploadDisposition(hugeGarbage, hugeGarbage.length).action === "reject",
+  "a huge non-PDF is rejected, never opened locally",
+);
+
+/* -------------------------------------------------------------------------- */
+/* 12. Attachment markers — the page/document identity contract                */
+/* -------------------------------------------------------------------------- */
+
+assert(
+  documentAttachmentMarker("physics notes.pdf") ===
+    "[Attached document: physics notes.pdf]",
+  "document marker matches the history marker format exactly",
+);
+assert(
+  documentAttachmentMarker("../../etc/notes.pdf") ===
+    "[Attached document: notes.pdf]",
+  "document marker sanitizes paths",
+);
+assert(
+  pagesAttachmentMarker("Pages 3–5 of notes.pdf") ===
+    "[Attached: Pages 3–5 of notes.pdf]",
+  "pages marker carries the viewer's page range label",
+);
+assert(
+  pagesAttachmentMarker("Page 2 of notes.pdf") ===
+    "[Attached: Page 2 of notes.pdf]",
+  "single-page marker keeps the label intact",
+);
+assert(
+  pagesAttachmentMarker("") === "[Attached: selected pages]",
+  "an empty page label still produces a valid marker",
+);
+assert(
+  pagesAttachmentMarker(`bad\u0000\u0001chars ${"x".repeat(400)}`).length <=
+    160 + "[Attached: ]".length,
+  "page labels are control-stripped and bounded",
+);
+// The chat action injects DOCUMENT_INSTRUCTION only when a marker like these
+// appears in the request — this is the wire contract that triggers it.
+const SERVER_MARKER_PATTERN = /\[Attached( document)?:/;
+assert(
+  SERVER_MARKER_PATTERN.test(documentAttachmentMarker("notes.pdf")) &&
+    SERVER_MARKER_PATTERN.test(pagesAttachmentMarker("Page 1 of notes.pdf")),
+  "both markers match the server's injection pattern",
+);
+assert(
+  !SERVER_MARKER_PATTERN.test("I attached my notes earlier"),
+  "ordinary prose never triggers the document instruction",
+);
+
+/* -------------------------------------------------------------------------- */
+/* 13. DOCUMENT_INSTRUCTION — grounding rules for attached documents          */
+/* -------------------------------------------------------------------------- */
+
+assert(
+  /Cite the page number/i.test(DOCUMENT_INSTRUCTION),
+  "document answers cite page numbers",
+);
+assert(
+  /do NOT state one/i.test(DOCUMENT_INSTRUCTION),
+  "unknown page numbers are never invented",
+);
+assert(
+  /NEVER invent text, page numbers, formulas/i.test(DOCUMENT_INSTRUCTION),
+  "inventing document content is explicitly forbidden",
+);
+assert(
+  /your own explanation/i.test(DOCUMENT_INSTRUCTION),
+  "Ashy's own words are separated from the document's",
+);
+assert(
+  /blurry|illegible/i.test(DOCUMENT_INSTRUCTION),
+  "scanned/blurry pages are handled honestly instead of guessed",
+);
+assert(
+  /Bangla/.test(DOCUMENT_INSTRUCTION) && /English/.test(DOCUMENT_INSTRUCTION),
+  "Bangla and English content are both supported",
+);
+assert(
+  /LaTeX/.test(DOCUMENT_INSTRUCTION),
+  "mathematics is preserved in LaTeX",
+);
+assert(
+  /summary, explanation, revision notes, flashcards or practice questions/i.test(
+    DOCUMENT_INSTRUCTION,
+  ),
+  "summaries, explanations, flashcards and practice questions are covered",
+);
+assert(
+  /Ask about page/.test(DOCUMENT_INSTRUCTION),
+  "missing pages route the student to the reader's page selection",
+);
+assert(
+  /never claim you cannot open files/i.test(DOCUMENT_INSTRUCTION),
+  "back-compat: Ashy still never claims it cannot open files",
+);
+assert(
+  DOCUMENT_INSTRUCTION !== TRANSCRIPTION_INSTRUCTION,
+  "document-answering and transcription modes remain separate instructions",
+);
+
+/* -------------------------------------------------------------------------- */
+/* 14. Local-only notice — the honest next step for oversized files           */
+/* -------------------------------------------------------------------------- */
+
+assert(
+  /isn't uploaded|not uploaded|never uploaded/i.test(PDF_LOCAL_ONLY_NOTICE.body),
+  "the local-only notice states the file is not uploaded",
+);
+assert(
+  PDF_LOCAL_ONLY_NOTICE.body.includes(String(MAX_SELECTED_PAGES)),
+  "the local-only notice names the page-range cap",
+);
+assert(
+  PDF_REJECTION_COPY.tooLarge.includes("60 MB"),
+  "the hard-reject copy names the real local ceiling",
+);
+assert(
+  PDF_REJECTION_COPY.tooManyPages.includes("read-only copy"),
+  "the page-cap copy points at the read-only reader, a real next step",
 );
 
 /* -------------------------------------------------------------------------- */

@@ -83,14 +83,19 @@ import {
 import {
   ACCEPTED_IMAGE_MIME_TYPES,
   IMAGE_REJECTION_COPY,
+  MAX_LOCAL_PDF_BYTES,
   MAX_PDF_BYTES,
+  PDF_LOCAL_ONLY_NOTICE,
   PDF_MIME_TYPE,
   PDF_REJECTION_COPY,
   decodeBase64,
   detectImageMimeFromBase64,
+  documentAttachmentMarker,
   formatFileSize,
+  hasPdfSignature,
   isAcceptedImageMime,
   mimeTypeFromDataUrl,
+  pagesAttachmentMarker,
   sanitizePdfName,
   validatePdfBytes,
 } from "@/lib/ashy-attachments";
@@ -245,11 +250,16 @@ export default function AshyPage() {
   const [pendingImage, setPendingImage] = useState<string | null>(
     () => loadAshyDraft(activeId)?.imageData ?? null,
   );
-  /** Phase 2: one pending PDF (draft-restored like the image attachment). */
+  /**
+   * Phase 2: one pending PDF (draft-restored like the image attachment).
+   * `localOnly` marks an oversized document opened as a local read-only
+   * copy: a blob URL that is never uploaded and never draft-persisted.
+   */
   const [pendingPdf, setPendingPdf] = useState<{
     name: string;
     size: number;
     dataUrl: string;
+    localOnly?: boolean;
   } | null>(() => {
     const stored = loadAshyDraft(activeId);
     return stored?.pdfDataUrl && stored.pdfName
@@ -260,6 +270,29 @@ export default function AshyPage() {
         }
       : null;
   });
+
+  // Local-only copies live as blob URLs. Revoke each one as soon as it
+  // leaves the composer (replaced, sent, removed): the first effect swaps
+  // them safely across updates, the second releases on unmount.
+  const localPdfUrlRef = useRef<string | null>(null);
+  useEffect(() => {
+    const url =
+      pendingPdf?.localOnly && pendingPdf.dataUrl.startsWith("blob:")
+        ? pendingPdf.dataUrl
+        : null;
+    const previous = localPdfUrlRef.current;
+    localPdfUrlRef.current = url;
+    if (previous && previous !== url) URL.revokeObjectURL(previous);
+  }, [pendingPdf]);
+  useEffect(
+    () => () => {
+      if (localPdfUrlRef.current) {
+        URL.revokeObjectURL(localPdfUrlRef.current);
+        localPdfUrlRef.current = null;
+      }
+    },
+    [],
+  );
   /** Open PDF reader (local draft data URL or a saved message's URL). */
   const [pdfViewer, setPdfViewer] = useState<{
     src: string;
@@ -587,9 +620,11 @@ export default function AshyPage() {
     saveAshyDraft(activeId, {
       text: draft,
       imageData: pendingImage ?? undefined,
-      pdfDataUrl: pendingPdf?.dataUrl,
-      pdfName: pendingPdf?.name,
-      pdfSize: pendingPdf?.size,
+      // Local-only read-only copies are never persisted: they can exceed
+      // the localStorage quota and must not leave the device anyway.
+      pdfDataUrl: pendingPdf?.localOnly ? undefined : pendingPdf?.dataUrl,
+      pdfName: pendingPdf?.localOnly ? undefined : pendingPdf?.name,
+      pdfSize: pendingPdf?.localOnly ? undefined : pendingPdf?.size,
       pagesLabel: pendingPages?.label,
       pagesImages: pendingPages?.images,
     });
@@ -802,22 +837,35 @@ export default function AshyPage() {
           data: stripDataUrlPrefix(dataUrl),
         });
       }
+      // Phase 2: a local-only read-only copy is never uploaded — its bytes
+      // stay on the device, so a question about it must carry rendered pages.
+      if (pendingPdf?.localOnly && (pendingPages?.images.length ?? 0) === 0) {
+        toast("Ask about specific pages first", {
+          description:
+            "This PDF is too large to attach. Open it, pick a page or page range with \u201cAsk about page\u201d, then send your question.",
+        });
+        return;
+      }
       // Phase 2: the pending PDF's bytes, re-checked client-side right before
       // the send (the file could be a restored draft from a stale session).
-      const pdf = pendingPdf
-        ? (() => {
-            const data = stripDataUrlPrefix(pendingPdf.dataUrl);
-            const check = validatePdfBytes(decodeBase64(data), pendingPdf.size);
-            if (!check.ok) {
-              toast("Couldn't send that PDF", {
-                description: PDF_REJECTION_COPY[check.reason],
-              });
-              return undefined;
-            }
-            return { name: pendingPdf.name, size: pendingPdf.size, data };
-          })()
-        : null;
-      if (pendingPdf && !pdf) return; // rejection toast already shown
+      const pdf =
+        pendingPdf && !pendingPdf.localOnly
+          ? (() => {
+              const data = stripDataUrlPrefix(pendingPdf.dataUrl);
+              const check = validatePdfBytes(
+                decodeBase64(data),
+                pendingPdf.size,
+              );
+              if (!check.ok) {
+                toast("Couldn't send that PDF", {
+                  description: PDF_REJECTION_COPY[check.reason],
+                });
+                return undefined;
+              }
+              return { name: pendingPdf.name, size: pendingPdf.size, data };
+            })()
+          : null;
+      if (pendingPdf && !pendingPdf.localOnly && !pdf) return; // rejection toast already shown
       if (!text && images.length === 0 && !pdf) {
         toast("Nothing to send yet", {
           description: "Type a question, or attach an image or PDF first.",
@@ -831,6 +879,18 @@ export default function AshyPage() {
         });
         return;
       }
+
+      // Phase 2: tell the model — and the chat bubble — exactly which
+      // document and which pages are attached. Page citations are only
+      // honest when the model knows which pages it was actually given.
+      const markers: string[] = [];
+      if (pdf) markers.push(documentAttachmentMarker(pdf.name));
+      if (pendingPages) {
+        markers.push(pagesAttachmentMarker(pendingPages.label));
+      }
+      const outgoingText = markers.length
+        ? (text ? `${text}\n\n` : "") + markers.join("\n")
+        : text;
 
       const myRequest = requestIdRef.current + 1;
       requestIdRef.current = myRequest;
@@ -875,7 +935,7 @@ export default function AshyPage() {
         const userMessage: AshyMessage = {
           id: newId(),
           role: "user",
-          text,
+          text: outgoingText,
           images: images.length > 0 ? images : undefined,
           // Optimistic PDF chip (name + size); the bytes go through the
           // chat action, never through the message document.
@@ -885,7 +945,7 @@ export default function AshyPage() {
         lastSendRef.current = {
           conversationId,
           clientMessageId: userMessage.id,
-          text,
+          text: outgoingText,
           images: images.length > 0 ? images : null,
           pdf: pdf ?? null,
           requestKind,
@@ -903,7 +963,7 @@ export default function AshyPage() {
           {
             conversationId,
             clientMessageId: userMessage.id,
-            text,
+            text: outgoingText,
             images,
             pdf,
             requestKind,
@@ -1238,26 +1298,55 @@ export default function AshyPage() {
       });
       return;
     }
-    if (file.size > MAX_PDF_BYTES) {
+    if (file.size > MAX_LOCAL_PDF_BYTES) {
       toast("PDF too large", { description: PDF_REJECTION_COPY.tooLarge });
       return;
     }
     try {
-      const dataUrl = await readImageFile(file);
-      const check = validatePdfBytes(
-        decodeBase64(stripDataUrlPrefix(dataUrl)),
-        file.size,
-      );
-      if (!check.ok) {
+      if (file.size <= MAX_PDF_BYTES) {
+        // Within the attach budget: validate from the bytes and keep a
+        // data-url draft (restorable after a reload) for the normal send.
+        const dataUrl = await readImageFile(file);
+        const check = validatePdfBytes(
+          decodeBase64(stripDataUrlPrefix(dataUrl)),
+          file.size,
+        );
+        if (check.ok) {
+          setPendingPdf({
+            name: sanitizePdfName(file.name),
+            size: file.size,
+            dataUrl,
+          });
+          return;
+        }
+        if (check.reason !== "tooManyPages") {
+          toast("Couldn't open that PDF", {
+            description: PDF_REJECTION_COPY[check.reason],
+          });
+          return;
+        }
+        // Over the page budget only — the local reader below still works.
+      }
+      // Oversized (file size or page count): open a LOCAL read-only copy.
+      // The bytes are never uploaded and never persisted — a blob URL feeds
+      // the reader, and questions go through rendered selected pages.
+      // (Encryption for these files is left to the reader itself, which
+      // reports a password-protected document with its own error state.)
+      const head = new Uint8Array(await file.slice(0, 4096).arrayBuffer());
+      if (!hasPdfSignature(head)) {
         toast("Couldn't open that PDF", {
-          description: PDF_REJECTION_COPY[check.reason],
+          description: PDF_REJECTION_COPY.notPdf,
         });
         return;
       }
       setPendingPdf({
         name: sanitizePdfName(file.name),
         size: file.size,
-        dataUrl,
+        dataUrl: URL.createObjectURL(file),
+        localOnly: true,
+      });
+      toast(PDF_LOCAL_ONLY_NOTICE.title, {
+        description: PDF_LOCAL_ONLY_NOTICE.body,
       });
     } catch {
       toast("Couldn't read that file", {
@@ -2084,7 +2173,9 @@ export default function AshyPage() {
                 {pendingPdf.name}
               </p>
               <p className="truncate text-xs text-muted-foreground">
-                {formatFileSize(pendingPdf.size)} · Ready for questions
+                {pendingPdf.localOnly
+                  ? `${formatFileSize(pendingPdf.size)} · Read-only copy — not uploaded`
+                  : `${formatFileSize(pendingPdf.size)} · Ready for questions`}
               </p>
             </div>
             <Button

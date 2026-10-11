@@ -80,7 +80,10 @@ import {
   type ImageAttachment,
   type PdfAttachment,
 } from "../lib/ashy-attachments";
-import { TRANSCRIPTION_INSTRUCTION } from "./ashyShared";
+import {
+  DOCUMENT_INSTRUCTION,
+  TRANSCRIPTION_INSTRUCTION,
+} from "./ashyShared";
 
 /** Google's current recommendation for new projects (verified Oct 2026). */
 const DEFAULT_MODEL = "gemini-3.5-flash-lite";
@@ -129,7 +132,7 @@ const FAILURE_MESSAGES: Record<FailureKind, string> = {
   encryptedPdf:
     "That PDF is password-protected. Remove the password (re-export it without one) and upload it again.",
   pdfTooManyPages:
-    "That PDF has more than 80 pages, so it can't be sent whole. Open it and ask about a page range instead — Ashy reads selected pages at a time.",
+    "That PDF has more than 80 pages, so it can't be sent whole. Ashy can still open it as a read-only copy so you can ask about a page range at a time.",
   readOnly:
     "Viewing another student's account — Ashy is read-only right now.",
 };
@@ -247,10 +250,6 @@ Images:
 - Never invent numbers, text, diagrams or syllabus details you cannot read clearly.
 - Keep answering follow-up questions about an image already in the conversation as if it were still in front of you.
 - When a photo is attached, web search is skipped automatically — answer from the photo and your knowledge.
-
-Documents (PDF):
-- Students can attach PDF notes, worksheets or textbook excerpts. When a document's pages are part of this message, read them like paper in front of you and answer from them.
-- The file itself is NOT re-sent with every later message. Older messages may only note which document was attached. If a follow-up genuinely needs the file's contents and they are not in this conversation, say so plainly and tell the student to tap "Ask about document" on the message where they uploaded it — never claim you cannot open files.
 
 Progress awareness:
 - You have the student's real Student OS progress summary in this context: syllabus completion overall and per subject/paper, recent completions, weakest and untouched areas, the next uncompleted topic, and study time and streak when tracked.
@@ -946,6 +945,20 @@ export const chat = action({
 
     // --- Assemble the request --------------------------------------------
     const systemParts = [SYSTEM_PROMPT];
+    // Document-grounding rules (citations, never-invent, scanned-page
+    // honesty, study outputs) whenever a document is in this request — or
+    // when history only REFERENCES one by marker (the "Ask about document"
+    // follow-up path), so those rules hold for re-reads too.
+    const mentionsAttachment = cleanContents.some((turn) =>
+      turn.parts.some(
+        (part) =>
+          typeof part.text === "string" &&
+          /\[Attached( document)?:/.test(part.text),
+      ),
+    );
+    if (hasDocument || mentionsAttachment) {
+      systemParts.push(DOCUMENT_INSTRUCTION);
+    }
     if (transcribing) {
       // Handwritten-note mode: the transcription rules replace normal
       // answering behaviour for this single request only.
