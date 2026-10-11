@@ -219,7 +219,7 @@ export default function AshyPage() {
   });
   const [chatNotFound, setChatNotFound] = useState(false);
   /** Project that a NEW chat will be created inside (chip above composer). */
-  const [openProjectId, setOpenProjectId] = useState<ProjId | null>(null);
+  const [openProjectId, setOpenProjectId] = useState<string | null>(null);
 
   /* --- composer --------------------------------------------------------- */
   const [draft, setDraft] = useState(
@@ -239,7 +239,7 @@ export default function AshyPage() {
 
   /* --- request state ---------------------------------------------------- */
   const [busy, setBusy] = useState(false);
-  const [busyConvId, setBusyConvId] = useState<ConvId | null>(null);
+  const [busyConvId, setBusyConvId] = useState<string | null>(null);
   /** True while the student is scrolled up (shows "Jump to latest"). */
   const [showJump, setShowJump] = useState(false);
   const [searchMode, setSearchMode] = useState<"auto" | "on" | "off">("auto");
@@ -261,7 +261,7 @@ export default function AshyPage() {
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameValue, setRenameValue] = useState("");
   const [newProjectDialog, setNewProjectDialog] = useState<{
-    moveChatId?: ConvId;
+    moveChatId?: string;
   } | null>(null);
   const [newProjectForm, setNewProjectForm] = useState({
     name: "",
@@ -345,7 +345,8 @@ export default function AshyPage() {
 
   /* --- messages: server truth + local overlay --------------------------- */
   const serverMessages = conversation?.messages;
-  const messages = useMemo(() => {  const base: AshyMessage[] = (serverMessages ?? []).map((message) => ({
+  const messages = useMemo(() => {
+    const base: AshyMessage[] = (serverMessages ?? []).map((message) => ({
       ...message,
       role: message.role,
     }));
@@ -355,8 +356,9 @@ export default function AshyPage() {
     return [...base, ...localList.filter((message) => !serverIds.has(message.id))];
   }, [serverMessages, pending, activeId]);
 
-  const activeProject = conversation?.projectId != null
-    ? (projects.find((project) => project.id === conversation.projectId) ?? null)
+  const activeProject = conversation?.projectId
+    ? (projects.find((project) => project.id === conversation.projectId) ??
+      null)
     : null;
   const newChatProject = openProjectId
     ? (projects.find((project) => project.id === openProjectId) ?? null)
@@ -366,7 +368,7 @@ export default function AshyPage() {
   const busyForActive = busy && busyConvId === activeId;
   const conversationLoading = activeId !== null && conversation === undefined;
 
-// Read-only while an admin is viewing another student's account: every write
+  // Read-only while an admin is viewing another student's account: every write
   // path is blocked on the backend, and the UI reflects that so the admin has
   // no expectation they can edit the student's chats.
   const readOnly =
@@ -463,50 +465,6 @@ export default function AshyPage() {
       );
     }
   }, [serverMessages]);
-
-  // When impersonation starts or the target changes, clear every local piece
-  // of Ashy state that could otherwise show the previous user's chats,
-  // drafts, search results or deep link. The backend now controls which chats
-  // are returned, but the client still keeps per-conversation drafts and the
-  // active conversation id in memory + localStorage, so those must be reset.
-  const previousTargetRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (isImpersonating && effectiveTargetId) {
-      // Report that the admin opened this target's Ashy history (server-deduped).
-      void reportHistoryViewedMut({});
-    }
-  }, [isImpersonating, effectiveTargetId]);
-
-  // Key drafts by the effective user so stopping impersonation cannot leave
-  // the student's drafts behind in localStorage for the admin to see later.
-  useEffect(() => {
-    if (!isImpersonating) {
-      // Back to the admin's own account: drop any residual target drafts and
-      // reset the active chat so a stale deep link can't be reopened.
-      if (previousTargetRef.current !== null) {
-        saveAshyDraft(null, null);
-        void applyActiveId(null);
-        setSearchInput("");
-        setSearchTerm("");
-      }
-      previousTargetRef.current = null;
-      return;
-    }
-    if (effectiveTargetId === previousTargetRef.current) return;
-    previousTargetRef.current = effectiveTargetId;
-    // New target: clear the prior chat, drafts, search and pending state.
-    void applyActiveId(null);
-    saveAshyDraft(null, null);
-    setSearchInput("");
-    setSearchTerm("");
-  }, [isImpersonating, effectiveTargetId]);
-
-  // While impersonating, report each chat the admin opens (server-deduped).
-  // This runs after applyActiveId commits the new activeId.
-  useEffect(() => {
-    if (!isImpersonating || !activeId) return;
-    void reportChatOpenedMut({ conversationId: activeId });
-  }, [isImpersonating, activeId]);
 
   /* --- URL sync + missing chats ----------------------------------------- */
 
@@ -768,7 +726,7 @@ export default function AshyPage() {
 
         // Normal send: ensure a conversation exists first (a new chat is
         // created on the first message, inside the open project if any).
-        let conversationId = activeId;
+        let conversationId: ConvId | null = activeId;
         if (!conversationId) {
           conversationId = await createConversationMut({
             projectId: openProjectId ? asProjId(openProjectId) : undefined,
@@ -797,7 +755,7 @@ export default function AshyPage() {
         setBusyConvId(conversationId);
         await runRequest(
           {
-            conversationId: conversationId,
+            conversationId,
             clientMessageId: userMessage.id,
             text,
             image,
@@ -997,7 +955,7 @@ export default function AshyPage() {
         });
         if (input.moveChatId) {
           await moveChatMut({
-            conversationId: input.moveChatId as Id<"conversations">,
+            conversationId: asConvId(input.moveChatId),
             projectId,
           });
           if (input.moveChatId === activeId) setOpenProjectId(projectId);
@@ -1011,8 +969,8 @@ export default function AshyPage() {
   );
 
   const deleteProject = useCallback(
-    (projectId: ProjId, mode: "move" | "delete") => {
-      void deleteProjectMut({ projectId, mode })
+    (projectId: string, mode: "move" | "delete") => {
+      void deleteProjectMut({ projectId: asProjId(projectId), mode })
         .then(({ affected }) => {
           if (openProjectId === projectId) setOpenProjectId(null);
           toast(
@@ -1223,6 +1181,50 @@ export default function AshyPage() {
     searchTerm.trim().length >= 2 ? { term: searchTerm.trim() } : "skip",
   );
 
+  // When impersonation starts or the target changes, clear every local piece
+  // of Ashy state that could otherwise show the previous user's chats,
+  // drafts, search results or deep link. The backend now controls which chats
+  // are returned, but the client still keeps per-conversation drafts and the
+  // active conversation id in memory + localStorage, so those must be reset.
+  const previousTargetRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (isImpersonating && effectiveTargetId) {
+      // Report that the admin opened this target's Ashy history (server-deduped).
+      void reportHistoryViewedMut({});
+    }
+  }, [isImpersonating, effectiveTargetId]);
+
+  // Key drafts by the effective user so stopping impersonation cannot leave
+  // the student's drafts behind in localStorage for the admin to see later.
+  useEffect(() => {
+    if (!isImpersonating) {
+      // Back to the admin's own account: drop any residual target drafts and
+      // reset the active chat so a stale deep link can't be reopened.
+      if (previousTargetRef.current !== null) {
+        saveAshyDraft(null, null);
+        void applyActiveId(null);
+        setSearchInput("");
+        setSearchTerm("");
+      }
+      previousTargetRef.current = null;
+      return;
+    }
+    if (effectiveTargetId === previousTargetRef.current) return;
+    previousTargetRef.current = effectiveTargetId;
+    // New target: clear the prior chat, drafts, search and pending state.
+    void applyActiveId(null);
+    saveAshyDraft(null, null);
+    setSearchInput("");
+    setSearchTerm("");
+  }, [isImpersonating, effectiveTargetId]);
+
+  // While impersonating, report each chat the admin opens (server-deduped).
+  // This runs after applyActiveId commits the new activeId.
+  useEffect(() => {
+    if (!isImpersonating || !activeId) return;
+    void reportChatOpenedMut({ conversationId: activeId });
+  }, [isImpersonating, activeId]);
+
   /* --- panel props --------------------------------------------------------- */
 
   const panelProps = {
@@ -1251,10 +1253,10 @@ export default function AshyPage() {
       );
     },
     onUpdateProject: (
-      id: Id<"projects">,
+      id: string,
       patch: { emoji?: string | null; instructions?: string | null },
     ) => {
-      void updateProjectMut({ projectId: id, ...patch }).catch(() =>
+      void updateProjectMut({ projectId: asProjId(id), ...patch }).catch(() =>
         toast("Couldn't update that project"),
       );
     },
@@ -1337,7 +1339,7 @@ export default function AshyPage() {
         <ChatHeader
           title={title}
           hasChat={hasChat}
-          pinned={conversation?.pinned != null ? conversation.pinned : false}
+          pinned={conversation?.pinned ?? false}
           project={activeProject}
           projects={projects}
           panelOpen={panelOpen}
@@ -1353,7 +1355,7 @@ export default function AshyPage() {
           onNewChat={startNewChat}
           onRenameChat={renameActiveChat}
           onTogglePin={() =>
-            activeId && togglePin(activeId, conversation?.pinned != null ? conversation.pinned : false)
+            activeId && togglePin(activeId, !(conversation?.pinned ?? false))
           }
           onMoveChat={(projectId) => activeId && moveChat(activeId, projectId)}
           onNewProjectForChat={() =>
@@ -2050,9 +2052,9 @@ export default function AshyPage() {
       {/* New project (from the header menu, optionally moving the chat) */}
       <Dialog
         open={newProjectDialog !== null}
-        onOpenChange={    (open) => {
+        onOpenChange={(open) => {
           if (!open) setNewProjectDialog(null);
-        }
+        }}
       >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>

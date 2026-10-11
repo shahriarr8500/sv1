@@ -1,368 +1,530 @@
-import { mutation, query } from "./_generated/server";
-import { v } from "convex/values";
+/**
+ * Ashy chat history — conversations, messages and projects.
+ *
+ * Every function here resolves the caller from ctx.auth (never from args)
+ * and only ever touches documents whose userId matches that caller, so a
+ * student can never read, move, rename, pin or delete another student's
+ * chats or projects — passing someone else's id simply returns not-found.
+ *
+ * Logs in this file never contain titles, message text, project names or
+ * keys: failures are recorded as a status/kind token only.
+ */
+
 import { getAuthUserId } from "@convex-dev/auth/server";
+import { paginationOptsValidator } from "convex/server";
+import { v } from "convex/values";
 import { internal } from "./_generated/api";
-import type { Id } from "./_generated/dataModel";
-import { recordAdminAuditIfDue } from "./impersonation";
+import {
+  internalMutation,
+  internalQuery,
+  mutation,
+  query,
+  type MutationCtx,
+  type QueryCtx,
+} from "./_generated/server";
+import type { Doc, Id } from "./_generated/dataModel";
+import { getEffectiveUser, recordAdminAuditIfDue } from "./impersonation";
 
-async function effectiveUser(
-  ctx: any,
-  callerId: Id<"users">,
-): Promise<{ effectiveUserId: Id<"users">; isImpersonating: boolean }> {
-  return ctx.runQuery(internal.impersonation.getEffectiveUser, { callerId });
+const TITLE_MAX = 80;
+const NAME_MAX = 60;
+const INSTRUCTIONS_MAX = 2000;
+/** Soft-delete undo window before the purge runs. */
+const DELETE_UNDO_MS = 8_000;
+/** Search bounds — a bounded scan, never an unindexed full-table sweep. */
+const SEARCH_TITLE_SCAN = 400;
+const SEARCH_MESSAGE_SCAN = 600;
+const SEARCH_RESULT_LIMIT = 20;
+/** Message rows returned when a chat is opened (chat view window). */
+const CONVERSATION_MESSAGE_LIMIT = 400;
+
+/* -------------------------------------------------------------------------- */
+/* Helpers                                                                     */
+/* -------------------------------------------------------------------------- */
+
+async function requireUser(
+  ctx: QueryCtx | MutationCtx,
+): Promise<Id<"users">> {
+  const userId = await getAuthUserId(ctx);
+  if (userId === null) throw new Error("unauthenticated");
+  return userId;
 }
 
-// ─── helpers ─────────────────────────────────────────────────────────────────
-
-function isOwner(
-  convo: Doc<"conversations"> | null,
-  effectiveUserId: Id<"users">,
-): convo is Doc<"conversations"> {
-  return (
-    convo != null &&
-    convo.userId === effectiveUserId &&
-    convo.deleted !== true
+/**
+ * The account whose data a READ should return. Normal users always get their
+ * own id; an admin with an open impersonation session gets the target's id.
+ * The admin role is re-checked from the DB inside getEffectiveUser — never
+ * trusted from the client.
+ */
+async function requireEffectiveUser(
+  ctx: QueryCtx | MutationCtx,
+): Promise<{ userId: Id<"users">; isImpersonating: boolean }> {
+  const callerId = await requireUser(ctx);
+  const { effectiveUserId, isImpersonating } = await getEffectiveUser(
+    ctx,
+    callerId,
   );
+  return { userId: effectiveUserId, isImpersonating };
 }
 
-// ─── queries ─────────────────────────────────────────────────────────────────
+/**
+ * Writes are rejected outright while an admin is viewing a student's account:
+ * the Ashy surface is read-only during impersonation. The check re-resolves
+ * the session from the DB on every call, so it cannot be bypassed by the
+ * client and closes the moment the session ends.
+ */
+async function requireWritableUser(
+  ctx: QueryCtx | MutationCtx,
+): Promise<Id<"users">> {
+  const callerId = await requireUser(ctx);
+  const { isImpersonating } = await getEffectiveUser(ctx, callerId);
+  if (isImpersonating) {
+    throw new Error("Read-only while viewing as a user");
+  }
+  return callerId;
+}
 
+function logKind(kind: string): void {
+  // Status/kind only — never titles, text, names or ids of content.
+  console.error(`[ashy-conversations] failure kind=${kind}`);
+}
+
+/** Owned, live conversation or null (callers decide how to present that). */
+async function liveConversation(
+  ctx: QueryCtx | MutationCtx,
+  userId: Id<"users">,
+  conversationId: Id<"conversations">,
+): Promise<Doc<"conversations"> | null> {
+  const doc = await ctx.db.get(conversationId);
+  if (!doc || doc.userId !== userId || doc.deleted) return null;
+  return doc;
+}
+
+function titleFromText(text: string): string {
+  const clean = text.replace(/\s+/g, " ").trim();
+  if (!clean) return "New chat";
+  return clean.length > 42 ? `${clean.slice(0, 42)}…` : clean;
+}
+
+function cleanTitle(raw: string | undefined, fallback: string): string {
+  const clean = (raw ?? "").replace(/\s+/g, " ").trim();
+  if (!clean) return fallback;
+  return clean.length > TITLE_MAX ? clean.slice(0, TITLE_MAX) : clean;
+}
+
+function cleanName(raw: string): string {
+  return raw.replace(/\s+/g, " ").trim().slice(0, NAME_MAX);
+}
+
+async function ownedProject(
+  ctx: QueryCtx | MutationCtx,
+  userId: Id<"users">,
+  projectId: Id<"projects">,
+): Promise<Doc<"projects"> | null> {
+  const doc = await ctx.db.get(projectId);
+  if (!doc || doc.userId !== userId) return null;
+  return doc;
+}
+
+/** Delete every message row (and its stored images) for a conversation. */
+async function deleteMessagesCascade(
+  ctx: MutationCtx,
+  conversationId: Id<"conversations">,
+): Promise<void> {
+  let rows = await ctx.db
+    .query("ashyMessages")
+    .withIndex("by_conversation", (q) => q.eq("conversationId", conversationId))
+    .take(200);
+  while (rows.length > 0) {
+    for (const row of rows) {
+      for (const image of row.images ?? []) {
+        try {
+          await ctx.storage.delete(image.storageId);
+        } catch {
+          // Best-effort blob cleanup — never blocks the delete itself.
+        }
+      }
+      await ctx.db.delete(row._id);
+    }
+    rows = await ctx.db
+      .query("ashyMessages")
+      .withIndex("by_conversation", (q) =>
+        q.eq("conversationId", conversationId),
+      )
+      .take(200);
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Queries                                                                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Cursor-paginated chat list, newest activity first (30 per page from the
+ * client). Optional filters: pinned only, or everything inside one project.
+ * Soft-deleted (undo-window) rows are hidden.
+ */
 export const listConversations = query({
   args: {
-    cursor: v.optional(v.string()),
-    limit: v.optional(v.number()),
+    paginationOpts: paginationOptsValidator,
+    pinned: v.optional(v.boolean()),
+    projectId: v.optional(v.id("projects")),
   },
   handler: async (ctx, args) => {
-    const callerId = await getAuthUserId(ctx);
-    if (!callerId) throw new Error("Not signed in.");
-
-    const { effectiveUserId } = await effectiveUser(ctx, callerId);
-
-    const limit = Math.max(1, args.limit ?? 20);
-    const page = await ctx.db
-      .query("conversations")
-      .withIndex("by_user_updated", (q) => q.eq("userId", effectiveUserId))
-      .order("desc")
-      .paginate({ cursor: args.cursor, limit });
-
-    const chats = page.page
-      .filter(notDeleted)
-      .map(toChatRow);
-
+    const { userId } = await requireEffectiveUser(ctx);
+    const builder =
+      args.projectId !== undefined
+        ? ctx.db
+            .query("conversations")
+            .withIndex("by_user_project", (q) =>
+              q.eq("userId", userId).eq("projectId", args.projectId!),
+            )
+        : args.pinned !== undefined
+          ? ctx.db
+              .query("conversations")
+              .withIndex("by_user_pinned", (q) =>
+                q.eq("userId", userId).eq("pinned", args.pinned!),
+              )
+          : ctx.db
+              .query("conversations")
+              .withIndex("by_user_updated", (q) => q.eq("userId", userId));
+    const page = await builder.order("desc").paginate(args.paginationOpts);
     return {
-      chats,
-      nextCursor: page.hasMore ? page.nextCursor : null,
-      hasMore: page.hasMore,
+      page: page.page.filter((conversation) => !conversation.deleted),
+      isDone: page.isDone,
+      continueCursor: page.continueCursor,
     };
   },
 });
 
+/** One conversation with its saved messages. null = not found / not yours. */
 export const getConversation = query({
-  args: {
-    conversationId: v.id("conversations"),
-  },
+  args: { conversationId: v.id("conversations") },
   handler: async (ctx, args) => {
-    const callerId = await getAuthUserId(ctx);
-    if (!callerId) throw new Error("Not signed in.");
+    const { userId } = await requireEffectiveUser(ctx);
+    const conversation = await liveConversation(ctx, userId, args.conversationId);
+    if (!conversation) return null;
 
-    const { effectiveUserId } = await effectiveUser(ctx, callerId);
-
-    const convo = await ctx.db.get(args.conversationId);
-    if (!isOwner(convo, effectiveUserId)) return null;
-
-    const messages = await ctx.db
+    const rows = await ctx.db
       .query("ashyMessages")
       .withIndex("by_conversation", (q) =>
         q.eq("conversationId", args.conversationId),
       )
-      .order("asc")
-      .collect();
+      .order("desc")
+      .take(CONVERSATION_MESSAGE_LIMIT);
+    rows.reverse();
 
-    const resolved = await Promise.all(
-      messages.map(resolveMessage(ctx)),
+    const messages = await Promise.all(
+      rows.map(async (row) => {
+        const images = await Promise.all(
+          (row.images ?? []).map(async (image) => ({
+            mimeType: image.mimeType,
+            url: await ctx.storage.getUrl(image.storageId),
+          })),
+        );
+        const withImages = images.filter(
+          (image): image is { mimeType: string; url: string } =>
+            image.url !== null,
+        );
+        return {
+          id: row.clientMessageId,
+          role: row.role,
+          text: row.text,
+          error: row.errorKind,
+          images: withImages.length > 0 ? withImages : undefined,
+          videos: row.videos,
+          videoSearch: row.videoSearch,
+          sources: row.sources,
+          searchQueries: row.searchQueries,
+          searchNotice: row.searchNotice,
+          searchNoticeKind: row.searchNoticeKind,
+          grounded: row.grounded,
+          searchEntryPointUrl: row.searchEntryPointUrl,
+          chips: row.chips,
+          planMissions: row.planMissions,
+        };
+      }),
     );
 
-    return { messages: resolved };
+    return {
+      id: conversation._id,
+      title: conversation.title,
+      pinned: conversation.pinned ?? false,
+      projectId: conversation.projectId,
+      updatedAt: conversation.updatedAt,
+      messageCount: conversation.messageCount ?? 0,
+      messages,
+    };
   },
 });
 
+/**
+ * Title + message-text search inside the caller's own chats only. Bounded
+ * scan (newest 400 titles + newest 600 message rows), ≤ 20 results, each
+ * with a short snippet — this never logs or returns other students' data.
+ */
 export const searchConversations = query({
-  args: {
-    term: v.string(),
-    cursor: v.optional(v.string()),
-    limit: v.optional(v.number()),
-  },
+  args: { term: v.string() },
   handler: async (ctx, args) => {
-    const callerId = await getAuthUserId(ctx);
-    if (!callerId) throw new Error("Not signed in.");
-
-    const { effectiveUserId } = await effectiveUser(ctx, callerId);
-
-    const needle = args.term.toLowerCase().trim();
-    if (needle.length < 2) return { results: [] };
-
-    const convos = await ctx.db
-      .query("conversations")
-      .withIndex("by_user_updated", (q) => q.eq("userId", effectiveUserId))
-      .order("desc")
-      .take(25);
-
-    const activeConos = convos.filter(notDeleted);
+    const { userId } = await requireEffectiveUser(ctx);
+    const term = args.term.trim().toLowerCase();
+    if (term.length < 2) return { results: [] };
 
     const results: Array<{
       conversationId: Id<"conversations">;
       title: string;
       snippet: string;
       matchedIn: "title" | "message";
+      updatedAt: number;
     }> = [];
+    const seenConversations = new Set<string>();
 
-    for (const convo of activeConos) {
-      if (results.length >= 15) break;
-
-      if (convo.title.toLowerCase().includes(needle)) {
+    // (1) Title matches first — cheap index scan.
+    const conversations = await ctx.db
+      .query("conversations")
+      .withIndex("by_user_updated", (q) => q.eq("userId", userId))
+      .order("desc")
+      .take(SEARCH_TITLE_SCAN);
+    const titleById = new Map<string, Doc<"conversations">>();
+    for (const conversation of conversations) {
+      if (conversation.deleted) continue;
+      titleById.set(conversation._id, conversation);
+      if (conversation.title.toLowerCase().includes(term)) {
+        seenConversations.add(conversation._id);
         results.push({
-          conversationId: convo._id,
-          title: convo.title,
-          snippet: convo.title,
+          conversationId: conversation._id,
+          title: conversation.title,
+          snippet: conversation.title,
           matchedIn: "title",
+          updatedAt: conversation.updatedAt,
         });
-        continue;
-      }
-
-      const recent = await ctx.db
-        .query("ashyMessages")
-        .withIndex("by_conversation", (q) =>
-          q.eq("conversationId", convo._id),
-        )
-        .order("desc")
-        .take(10);
-
-      for (const m of recent) {
-        if (results.length >= 15) break;
-        if (m.text.toLowerCase().includes(needle)) {
-          results.push({
-            conversationId: convo._id,
-            title: convo.title,
-            snippet: m.text.slice(0, 160),
-            matchedIn: "message",
-          });
-          break;
-        }
       }
     }
 
-    return { results };
+    // (2) Message-text matches — bounded scan of the newest messages.
+    const messages = await ctx.db
+      .query("ashyMessages")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .order("desc")
+      .take(SEARCH_MESSAGE_SCAN);
+    for (const row of messages) {
+      if (seenConversations.has(row.conversationId)) continue;
+      const index = row.text.toLowerCase().indexOf(term);
+      if (index === -1) continue;
+      let conversation = titleById.get(row.conversationId);
+      if (!conversation) {
+        const fetched = await ctx.db.get(row.conversationId);
+        if (!fetched || fetched.deleted) continue;
+        conversation = fetched;
+      }
+      seenConversations.add(row.conversationId);
+      const start = Math.max(0, index - 50);
+      const end = Math.min(row.text.length, index + term.length + 90);
+      results.push({
+        conversationId: row.conversationId,
+        title: conversation.title,
+        snippet: `${start > 0 ? "…" : ""}${row.text.slice(start, end).replace(/\s+/g, " ")}${end < row.text.length ? "…" : ""}`,
+        matchedIn: "message",
+        updatedAt: conversation.updatedAt,
+      });
+      if (results.length >= SEARCH_RESULT_LIMIT * 2) break;
+    }
+
+    results.sort((a, b) => b.updatedAt - a.updatedAt);
+    return { results: results.slice(0, SEARCH_RESULT_LIMIT) };
   },
 });
 
+/** The student's projects with live chat counts (for menus and confirms). */
 export const listProjects = query({
   args: {},
   handler: async (ctx) => {
-    const callerId = await getAuthUserId(ctx);
-    if (!callerId) throw new Error("Not signed in.");
-
-    const { effectiveUserId } = await effectiveUser(ctx, callerId);
-
+    const { userId } = await requireEffectiveUser(ctx);
     const projects = await ctx.db
       .query("projects")
-      .withIndex("by_user", (q) => q.eq("userId", effectiveUserId))
+      .withIndex("by_user", (q) => q.eq("userId", userId))
       .order("desc")
       .take(100);
-
-    const convos = await ctx.db
-      .query("conversations")
-      .withIndex("by_user_updated", (q) => q.eq("userId", effectiveUserId))
-      .order("desc")
-      .take(300);
-
-    const counts: Record<string, number> = {};
-    for (const c of convos) {
-      if (c.deleted === true) continue;
-      if (c.projectId == null) continue;
-      counts[String(c.projectId)] =
-        (counts[String(c.projectId)] ?? 0) + 1;
-    }
-
-    return {
-      projects: projects.map((p) => ({
-        id: p._id,
-        name: p.name,
-        emoji: p.emoji,
-        instructions: p.instructions,
-        chatCount: counts[String(p._id)] ?? 0,
-      })),
-    };
+    const withCounts = await Promise.all(
+      projects.map(async (project) => {
+        const conversations = await ctx.db
+          .query("conversations")
+          .withIndex("by_user_project", (q) =>
+            q.eq("userId", userId).eq("projectId", project._id),
+          )
+          .take(999);
+        return {
+          id: project._id,
+          name: project.name,
+          emoji: project.emoji,
+          instructions: project.instructions,
+          createdAt: project.createdAt,
+          updatedAt: project.updatedAt,
+          chatCount: conversations.filter((c) => !c.deleted).length,
+        };
+      }),
+    );
+    return { projects: withCounts };
   },
 });
 
-// ─── mutations ───────────────────────────────────────────────────────────────
+/* -------------------------------------------------------------------------- */
+/* Conversation mutations                                                      */
+/* -------------------------------------------------------------------------- */
 
+/** Create a chat (optionally straight into a project). Empties are swept. */
 export const createConversation = mutation({
   args: {
+    title: v.optional(v.string()),
     projectId: v.optional(v.id("projects")),
   },
   handler: async (ctx, args) => {
-    const callerId = await getAuthUserId(ctx);
-    if (!callerId) throw new Error("Not signed in.");
+    const userId = await requireWritableUser(ctx);
+    let projectId: Id<"projects"> | undefined;
+    if (args.projectId) {
+      const project = await ownedProject(ctx, userId, args.projectId);
+      if (!project) throw new Error("project-not-found");
+      projectId = project._id;
+    }
 
-    const { effectiveUserId } = await effectiveUser(ctx, callerId);
     const now = Date.now();
+    // Sweep this student's stale EMPTY chats (nothing was ever typed) so
+    // repeated "New chat" clicks don't litter the history list. A chat that
+    // is 3 minutes old and still empty is never holding anything.
+    try {
+      const recent = await ctx.db
+        .query("conversations")
+        .withIndex("by_user_updated", (q) => q.eq("userId", userId))
+        .order("desc")
+        .take(15);
+      for (const conversation of recent) {
+        if (conversation.deleted) continue;
+        if ((conversation.messageCount ?? 0) > 0) continue;
+        if (now - conversation.updatedAt < 3 * 60_000) continue;
+        await ctx.db.patch(conversation._id, {
+          deleted: true,
+          deletedAt: now,
+        });
+        await ctx.scheduler.runAfter(
+          DELETE_UNDO_MS,
+          internal.ashyConversations.purgeConversation,
+          { conversationId: conversation._id },
+        );
+      }
+    } catch (error) {
+      logKind(`empty-sweep:${error instanceof Error ? "error" : "unknown"}`);
+    }
 
-    const id = await ctx.db.insert("conversations", {
-      userId: effectiveUserId,
-      title: "New chat",
+    return await ctx.db.insert("conversations", {
+      userId,
+      title: cleanTitle(args.title, "New chat"),
+      titleAuto: true,
       createdAt: now,
       updatedAt: now,
+      pinned: false,
+      projectId,
+      deleted: false,
       messageCount: 0,
       lastSeq: 0,
-      pinned: false,
-      pinnedAt: null,
-      projectId: args.projectId ?? null,
-      deletedAt: null,
-      deleted: false,
-      titleAuto: undefined,
-      renamedAt: null,
     });
-
-    return { id };
   },
 });
 
+/** Rename. A rename always wins over later auto-titling. */
 export const renameConversation = mutation({
-  args: {
-    conversationId: v.id("conversations"),
-    title: v.string(),
-  },
+  args: { conversationId: v.id("conversations"), title: v.string() },
   handler: async (ctx, args) => {
-    const callerId = await getAuthUserId(ctx);
-    if (!callerId) throw new Error("Not signed in.");
-
-    const { effectiveUserId } = await effectiveUser(ctx, callerId);
-
-    const convo = await ctx.db.get(args.conversationId);
-    if (!isOwner(convo, effectiveUserId)) {
-      throw new Error("Conversation not found.");
-    }
-
-    const title = args.title.trim().slice(0, 200) || "Untitled";
-    await ctx.db.patch(args.conversationId, {
+    const userId = await requireWritableUser(ctx);
+    const conversation = await liveConversation(ctx, userId, args.conversationId);
+    if (!conversation) throw new Error("not-found");
+    const title = cleanTitle(args.title, "");
+    if (!title) throw new Error("invalid-title");
+    await ctx.db.patch(conversation._id, {
       title,
+      titleAuto: false,
       renamedAt: Date.now(),
     });
-
     return { ok: true };
   },
 });
 
 export const setConversationPinned = mutation({
-  args: {
-    conversationId: v.id("conversations"),
-    pinned: v.boolean(),
-  },
+  args: { conversationId: v.id("conversations"), pinned: v.boolean() },
   handler: async (ctx, args) => {
-    const callerId = await getAuthUserId(ctx);
-    if (!callerId) throw new Error("Not signed in.");
-
-    const { effectiveUserId } = await effectiveUser(ctx, callerId);
-
-    const convo = await ctx.db.get(args.conversationId);
-    if (!isOwner(convo, effectiveUserId)) {
-      throw new Error("Conversation not found.");
-    }
-
-    await ctx.db.patch(args.conversationId, {
+    const userId = await requireWritableUser(ctx);
+    const conversation = await liveConversation(ctx, userId, args.conversationId);
+    if (!conversation) throw new Error("not-found");
+    await ctx.db.patch(conversation._id, {
       pinned: args.pinned,
-      pinnedAt: args.pinned ? Date.now() : null,
+      pinnedAt: args.pinned ? Date.now() : undefined,
     });
-
     return { ok: true };
   },
 });
 
+/** Move a chat into a project, or out of it with projectId: null. */
 export const moveConversationToProject = mutation({
   args: {
     conversationId: v.id("conversations"),
-    projectId: v.optional(v.id("projects")),
+    projectId: v.union(v.id("projects"), v.null()),
   },
   handler: async (ctx, args) => {
-    const callerId = await getAuthUserId(ctx);
-    if (!callerId) throw new Error("Not signed in.");
-
-    const { effectiveUserId } = await effectiveUser(ctx, callerId);
-
-    const convo = await ctx.db.get(args.conversationId);
-    if (!isOwner(convo, effectiveUserId)) {
-      throw new Error("Conversation not found.");
+    const userId = await requireWritableUser(ctx);
+    const conversation = await liveConversation(ctx, userId, args.conversationId);
+    if (!conversation) throw new Error("not-found");
+    if (args.projectId === null) {
+      await ctx.db.patch(conversation._id, { projectId: undefined });
+      return { ok: true };
     }
-
-    if (args.projectId !== undefined) {
-      const project = await ctx.db.get(args.projectId);
-      if (!project || project.userId !== effectiveUserId) {
-        throw new Error("Project not found.");
-      }
-    }
-
-    await ctx.db.patch(args.conversationId, {
-      projectId: args.projectId,
-    });
-
+    const project = await ownedProject(ctx, userId, args.projectId);
+    if (!project) throw new Error("project-not-found");
+    await ctx.db.patch(conversation._id, { projectId: project._id });
     return { ok: true };
   },
 });
 
+/**
+ * Soft delete (hidden immediately, purged after the undo window). The undo
+ * action calls restoreConversation within that window.
+ */
 export const deleteConversation = mutation({
-  args: {
-    conversationId: v.id("conversations"),
-  },
+  args: { conversationId: v.id("conversations") },
   handler: async (ctx, args) => {
-    const callerId = await getAuthUserId(ctx);
-    if (!callerId) throw new Error("Not signed in.");
-
-    const { effectiveUserId } = await effectiveUser(ctx, callerId);
-
-    const convo = await ctx.db.get(args.conversationId);
-    if (!isOwner(convo, effectiveUserId)) {
-      throw new Error("Conversation not found.");
-    }
-
-    await ctx.db.patch(args.conversationId, {
-      deleted: true,
-      deletedAt: Date.now(),
-      updatedAt: Date.now(),
-    });
-
+    const userId = await requireWritableUser(ctx);
+    const conversation = await liveConversation(ctx, userId, args.conversationId);
+    if (!conversation) throw new Error("not-found");
+    const now = Date.now();
+    await ctx.db.patch(conversation._id, { deleted: true, deletedAt: now });
+    await ctx.scheduler.runAfter(
+      DELETE_UNDO_MS,
+      internal.ashyConversations.purgeConversation,
+      { conversationId: conversation._id },
+    );
     return { ok: true };
   },
 });
 
+/** Undo a soft delete (only possible inside the undo window). */
 export const restoreConversation = mutation({
-  args: {
-    conversationId: v.id("conversations"),
-  },
+  args: { conversationId: v.id("conversations") },
   handler: async (ctx, args) => {
-    const callerId = await getAuthUserId(ctx);
-    if (!callerId) throw new Error("Not signed in.");
-
-    const { effectiveUserId } = await effectiveUser(ctx, callerId);
-
-    const convo = await ctx.db.get(args.conversationId);
-    if (
-      !convo ||
-      convo.userId !== effectiveUserId ||
-      convo.deleted !== true
-    ) {
-      throw new Error("Conversation not found.");
+    const userId = await requireWritableUser(ctx);
+    const conversation = await ctx.db.get(args.conversationId);
+    if (!conversation || conversation.userId !== userId) {
+      throw new Error("not-found");
     }
-
-    await ctx.db.patch(args.conversationId, {
+    if (!conversation.deleted) return { ok: true };
+    await ctx.db.patch(conversation._id, {
       deleted: false,
-      deletedAt: null,
+      deletedAt: undefined,
     });
-
     return { ok: true };
   },
 });
 
+/**
+ * Edit the student's last user message in place: the new text replaces the
+ * stored text and every message after it is removed (a fresh answer follows).
+ */
 export const editUserMessage = mutation({
   args: {
     conversationId: v.id("conversations"),
@@ -370,51 +532,58 @@ export const editUserMessage = mutation({
     text: v.string(),
   },
   handler: async (ctx, args) => {
-    const callerId = await getAuthUserId(ctx);
-    if (!callerId) throw new Error("Not signed in.");
-
-    const { effectiveUserId } = await effectiveUser(ctx, callerId);
-
-    const convo = await ctx.db.get(args.conversationId);
-    if (!isOwner(convo, effectiveUserId)) {
-      throw new Error("Conversation not found.");
-    }
-
-    const message = await ctx.db
+    const userId = await requireWritableUser(ctx);
+    const conversation = await liveConversation(ctx, userId, args.conversationId);
+    if (!conversation) throw new Error("not-found");
+    const row = await ctx.db
       .query("ashyMessages")
       .withIndex("by_conversation_client", (q) =>
         q
           .eq("conversationId", args.conversationId)
           .eq("clientMessageId", args.clientMessageId),
       )
-      .first();
-
-    if (!message || message.userId !== effectiveUserId) {
-      throw new Error("Message not found.");
+      .unique();
+    if (!row || row.userId !== userId || row.role !== "user") {
+      throw new Error("not-found");
     }
+    const text = args.text.replace(/\s+$/, "").slice(0, 12_000);
+    if (!text.trim()) throw new Error("invalid-text");
 
-    await ctx.db.patch(message._id, { text: args.text });
-    await ctx.db.patch(args.conversationId, { updatedAt: Date.now() });
-
+    // Drop everything after this message (its answer), then update the text.
+    const newer = await ctx.db
+      .query("ashyMessages")
+      .withIndex("by_conversation", (q) =>
+        q.eq("conversationId", args.conversationId).gt("seq", row.seq),
+      )
+      .take(200);
+    let removed = 0;
+    for (const doc of newer) {
+      for (const image of doc.images ?? []) {
+        try {
+          await ctx.storage.delete(image.storageId);
+        } catch {
+          // Best-effort blob cleanup.
+        }
+      }
+      await ctx.db.delete(doc._id);
+      removed += 1;
+    }
+    await ctx.db.patch(row._id, { text });
+    await ctx.db.patch(conversation._id, {
+      messageCount: Math.max(0, (conversation.messageCount ?? 1) - removed),
+      updatedAt: Date.now(),
+    });
     return { ok: true };
   },
 });
 
+/** Remove a trailing assistant answer (used by Regenerate). */
 export const dropTrailingReply = mutation({
-  args: {
-    conversationId: v.id("conversations"),
-  },
+  args: { conversationId: v.id("conversations") },
   handler: async (ctx, args) => {
-    const callerId = await getAuthUserId(ctx);
-    if (!callerId) throw new Error("Not signed in.");
-
-    const { effectiveUserId } = await effectiveUser(ctx, callerId);
-
-    const convo = await ctx.db.get(args.conversationId);
-    if (!isOwner(convo, effectiveUserId)) {
-      throw new Error("Conversation not found.");
-    }
-
+    const userId = await requireWritableUser(ctx);
+    const conversation = await liveConversation(ctx, userId, args.conversationId);
+    if (!conversation) throw new Error("not-found");
     const last = await ctx.db
       .query("ashyMessages")
       .withIndex("by_conversation", (q) =>
@@ -422,98 +591,21 @@ export const dropTrailingReply = mutation({
       )
       .order("desc")
       .first();
-
-    if (!last) return { ok: true, dropped: false };
-    if (last.userId !== effectiveUserId) return { ok: true, dropped: false };
-
-    await ctx.db.delete(last._id);
-
-    const remaining = await ctx.db
-      .query("ashyMessages")
-      .withIndex("by_conversation", (q) =>
-        q.eq("conversationId", args.conversationId),
-      )
-      .order("desc")
-      .take(2);
-
-    await ctx.db.patch(args.conversationId, {
-      messageCount: Math.max(0, (convo.messageCount ?? 1) - 1),
-      lastSeq: Math.max(0, (convo.lastSeq ?? 0) - 1),
-      updatedAt:
-        remaining.length > 1 ? remaining[1].createdAt : convo.createdAt,
-      pinned: convo.pinned,
-      pinnedAt: convo.pinnedAt,
-      projectId: convo.projectId,
-      title: convo.title,
-      titleAuto: convo.titleAuto,
-      renamedAt: convo.renamedAt,
-      deletedAt: convo.deletedAt,
-      deleted: convo.deleted,
-    });
-
-    return { ok: true, dropped: true };
-  },
-});
-
-export const persistUserMessage = mutation({
-  args: {
-    conversationId: v.id("conversations"),
-    clientMessageId: v.string(),
-    text: v.string(),
-    images: v.optional(
-      v.array(
-        v.object({
-          mimeType: v.string(),
-          storageId: v.id("_storage"),
-        }),
-      ),
-    ),
-  },
-  handler: async (ctx, args) => {
-    const callerId = await getAuthUserId(ctx);
-    if (!callerId) throw new Error("Not signed in.");
-
-    const { effectiveUserId } = await effectiveUser(ctx, callerId);
-
-    const convo = await ctx.db.get(args.conversationId);
-    if (!isOwner(convo, effectiveUserId)) {
-      throw new Error("Conversation not found.");
+    if (last && last.userId === userId && last.role === "assistant") {
+      await ctx.db.delete(last._id);
+      await ctx.db.patch(conversation._id, {
+        messageCount: Math.max(0, (conversation.messageCount ?? 1) - 1),
+        updatedAt: Date.now(),
+      });
     }
-
-    const now = Date.now();
-    const seq = (convo.lastSeq ?? 0) + 1;
-    const isFirst = convo.messageCount === 0;
-
-    await ctx.db.insert("ashyMessages", {
-      conversationId: args.conversationId,
-      userId: effectiveUserId,
-      clientMessageId: args.clientMessageId,
-      role: "user",
-      text: args.text,
-      seq,
-      createdAt: now,
-      images: args.images ?? undefined,
-    });
-
-    const newTitle =
-      isFirst && convo.renamedAt == null
-        ? args.text.slice(0, 200)
-        : convo.title;
-    const titleAuto =
-      isFirst && convo.renamedAt == null ? true : convo.titleAuto;
-
-    await ctx.db.patch(args.conversationId, {
-      lastSeq: seq,
-      messageCount: (convo.messageCount ?? 0) + 1,
-      updatedAt: now,
-      title: newTitle,
-      titleAuto,
-    });
-
     return { ok: true };
   },
 });
 
+/**
+ * Persist a successful assistant answer for a conversation the caller owns.
+ * Idempotent by clientMessageId, so a retried call never duplicates a reply.
+ */
 export const appendReply = mutation({
   args: {
     conversationId: v.id("conversations"),
@@ -539,11 +631,7 @@ export const appendReply = mutation({
     ),
     sources: v.optional(
       v.array(
-        v.object({
-          title: v.string(),
-          url: v.string(),
-          domain: v.string(),
-        }),
+        v.object({ title: v.string(), url: v.string(), domain: v.string() }),
       ),
     ),
     searchQueries: v.optional(v.array(v.string())),
@@ -566,180 +654,180 @@ export const appendReply = mutation({
     ),
   },
   handler: async (ctx, args) => {
-    const callerId = await getAuthUserId(ctx);
-    if (!callerId) throw new Error("Not signed in.");
-
-    const { effectiveUserId } = await effectiveUser(ctx, callerId);
-
-    const convo = await ctx.db.get(args.conversationId);
-    if (!isOwner(convo, effectiveUserId)) {
-      throw new Error("Conversation not found.");
-    }
+    const userId = await requireWritableUser(ctx);
+    const conversation = await liveConversation(ctx, userId, args.conversationId);
+    if (!conversation) throw new Error("not-found");
+    const existing = await ctx.db
+      .query("ashyMessages")
+      .withIndex("by_conversation_client", (q) =>
+        q
+          .eq("conversationId", args.conversationId)
+          .eq("clientMessageId", args.clientMessageId),
+      )
+      .unique();
+    if (existing) return { ok: true, duplicate: true };
 
     const now = Date.now();
-    const seq = (convo.lastSeq ?? 0) + 1;
-
+    const seq = (conversation.lastSeq ?? 0) + 1;
     await ctx.db.insert("ashyMessages", {
-      conversationId: args.conversationId,
-      userId: effectiveUserId,
+      conversationId: conversation._id,
+      userId,
       clientMessageId: args.clientMessageId,
       role: "assistant",
-      text: args.text,
+      text: args.text.slice(0, 40_000),
       seq,
       createdAt: now,
-      videos: args.videos ?? undefined,
-      videoSearch: args.videoSearch ?? undefined,
-      sources: args.sources ?? undefined,
-      searchQueries: args.searchQueries ?? undefined,
-      searchNotice: args.searchNotice ?? undefined,
-      searchNoticeKind: args.searchNoticeKind ?? undefined,
-      grounded: args.grounded ?? undefined,
-      searchEntryPointUrl: args.searchEntryPointUrl ?? undefined,
-      chips: args.chips ?? undefined,
-      planMissions: args.planMissions ?? undefined,
+      videos: args.videos,
+      videoSearch: args.videoSearch,
+      sources: args.sources,
+      searchQueries: args.searchQueries,
+      searchNotice: args.searchNotice,
+      searchNoticeKind: args.searchNoticeKind,
+      grounded: args.grounded,
+      searchEntryPointUrl: args.searchEntryPointUrl,
+      chips: args.chips,
+      planMissions: args.planMissions,
     });
-
-    await ctx.db.patch(args.conversationId, {
+    await ctx.db.patch(conversation._id, {
       lastSeq: seq,
-      messageCount: (convo.messageCount ?? 0) + 1,
+      messageCount: (conversation.messageCount ?? 0) + 1,
       updatedAt: now,
     });
-
     return { ok: true };
   },
 });
 
-export const loadChatForReply = query({
+/* -------------------------------------------------------------------------- */
+/* Internal: used by the chat action and the delete scheduler                  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Persist the student's outgoing message BEFORE the model runs, so the
+ * question survives even when the answer fails. Idempotent by
+ * clientMessageId (a network retry re-sends the same id and never
+ * duplicates). Called from the chat action with an already-verified userId.
+ */
+export const persistUserMessage = internalMutation({
   args: {
+    userId: v.id("users"),
     conversationId: v.id("conversations"),
+    clientMessageId: v.string(),
+    text: v.string(),
+    /** Photos already uploaded to storage by the chat action. */
+    images: v.optional(
+      v.array(
+        v.object({ mimeType: v.string(), storageId: v.id("_storage") }),
+      ),
+    ),
   },
   handler: async (ctx, args) => {
-    const callerId = await getAuthUserId(ctx);
-    if (!callerId) throw new Error("Not signed in.");
+    const conversation = await ctx.db.get(args.conversationId);
+    if (!conversation || conversation.userId !== args.userId) {
+      return { ok: false as const, kind: "not-found" };
+    }
+    const existing = await ctx.db
+      .query("ashyMessages")
+      .withIndex("by_conversation_client", (q) =>
+        q
+          .eq("conversationId", args.conversationId)
+          .eq("clientMessageId", args.clientMessageId),
+      )
+      .unique();
+    if (existing) return { ok: true as const, duplicate: true };
 
-    const { effectiveUserId } = await effectiveUser(ctx, callerId);
+    // Photos live in Convex storage (uploaded by the chat action) — a
+    // base64 photo can exceed the 1 MiB document limit.
+    const images =
+      args.images && args.images.length > 0 ? args.images : undefined;
 
-    const convo = await ctx.db.get(args.conversationId);
-    if (!isOwner(convo, effectiveUserId)) {
+    const now = Date.now();
+    const seq = (conversation.lastSeq ?? 0) + 1;
+    const text = args.text.replace(/\s+$/, "").slice(0, 12_000);
+    await ctx.db.insert("ashyMessages", {
+      conversationId: conversation._id,
+      userId: args.userId,
+      clientMessageId: args.clientMessageId,
+      role: "user",
+      text,
+      seq,
+      createdAt: now,
+      images,
+    });
+
+    // Auto-title from the first message — never after a student rename.
+    const autoTitle =
+      !conversation.renamedAt && conversation.titleAuto !== false && text.trim();
+    await ctx.db.patch(conversation._id, {
+      lastSeq: seq,
+      messageCount: (conversation.messageCount ?? 0) + 1,
+      updatedAt: now,
+      ...(autoTitle ? { title: titleFromText(text) } : {}),
+    });
+    return { ok: true as const };
+  },
+});
+
+/**
+ * Read everything the chat action needs for one reply: ownership check,
+ * the recent message rows (ids + text + image refs, never bytes) and the
+ * owning project's note. Actions have no direct db access, so they go
+ * through this query.
+ */
+export const loadChatForReply = internalQuery({
+  args: { userId: v.id("users"), conversationId: v.id("conversations") },
+  handler: async (ctx, args) => {
+    const conversation = await ctx.db.get(args.conversationId);
+    if (!conversation || conversation.userId !== args.userId || conversation.deleted) {
       return null;
     }
-
-    const messages = await ctx.db
+    const rows = await ctx.db
       .query("ashyMessages")
       .withIndex("by_conversation", (q) =>
         q.eq("conversationId", args.conversationId),
       )
-      .order("asc")
-      .collect();
-
-    const rows = messages.map((m) => ({
-      clientMessageId: m.clientMessageId,
-      role: m.role,
-      text: m.text,
-      failed: m.errorKind != null,
-      images:
-        m.images != null
-          ? m.images.map((img) => ({
-              mimeType: img.mimeType,
-              storageId: img.storageId,
-            }))
-          : [],
-      videos: (m.videos ?? []).map((v) => ({
-        videoId: v.videoId,
-        title: v.title,
-        channel: v.channel,
-        thumbnail: v.thumbnail,
-        durationLabel: v.durationLabel,
+      .order("desc")
+      .take(80);
+    rows.reverse();
+    let note = "";
+    if (conversation.projectId) {
+      const project = await ctx.db.get(conversation.projectId);
+      if (project && project.userId === args.userId && project.instructions) {
+        note = project.instructions.slice(0, 600);
+      }
+    }
+    return {
+      note,
+      rows: rows.map((row) => ({
+        clientMessageId: row.clientMessageId,
+        role: row.role,
+        text: row.text,
+        failed: row.errorKind !== undefined,
+        images: (row.images ?? []).map((image) => ({
+          mimeType: image.mimeType,
+          storageId: image.storageId,
+        })),
       })),
-      videoSearch: m.videoSearch ?? null,
-      sources: (m.sources ?? []).map((s) => ({
-        title: s.title,
-        url: s.url,
-        domain: s.domain,
-      })),
-      searchQueries: m.searchQueries ?? [],
-      searchNotice: m.searchNotice ?? null,
-      searchNoticeKind: m.searchNoticeKind ?? null,
-      grounded: m.grounded ?? false,
-      searchEntryPointUrl: m.searchEntryPointUrl ?? null,
-      chips: m.chips ?? [],
-      planMissions: (m.planMissions ?? {
-        itemIds: [],
-        labels: [],
-      }) as { itemIds: string[]; labels: string[] },
-    }));
-
-    const note =
-      convo.projectId != null
-        ? ((await ctx.db.get(convo.projectId))?.instructions ?? "")
-        : "";
-
-    return { rows, note };
+    };
   },
 });
 
-export const purgeConversation = mutation({
-  args: {
-    conversationId: v.id("conversations"),
-    olderThan: v.number(),
-  },
+/** Scheduled N seconds after a soft delete — hard-delete when still deleted. */
+export const purgeConversation = internalMutation({
+  args: { conversationId: v.id("conversations") },
   handler: async (ctx, args) => {
-    const callerId = await getAuthUserId(ctx);
-    if (!callerId) throw new Error("Not signed in.");
-
-    const { effectiveUserId } = await effectiveUser(ctx, callerId);
-
-    const convo = await ctx.db.get(args.conversationId);
-    if (!isOwner(convo, effectiveUserId)) {
-      throw new Error("Conversation not found.");
+    const conversation = await ctx.db.get(args.conversationId);
+    if (!conversation || !conversation.deleted) return; // restored in time
+    if ((conversation.deletedAt ?? 0) > Date.now() - DELETE_UNDO_MS + 1_000) {
+      return; // another delete happened moments ago — its own purge will run
     }
-
-    const messages = await ctx.db
-      .query("ashyMessages")
-      .withIndex("by_conversation", (q) =>
-        q.eq("conversationId", args.conversationId),
-      )
-      .filter((m) => m.createdAt < args.olderThan)
-      .collect();
-
-    for (const m of messages) {
-      await ctx.db.delete(m._id);
-    }
-
-    if (messages.length > 0) {
-      const remaining = await ctx.db
-        .query("ashyMessages")
-        .withIndex("by_conversation", (q) =>
-          q.eq("conversationId", args.conversationId),
-        )
-        .order("desc")
-        .take(2);
-
-      await ctx.db.patch(args.conversationId, {
-        messageCount:
-          Math.max(0, (convo.messageCount ?? 0) - messages.length),
-        lastSeq:
-          Math.max(0, (convo.lastSeq ?? 0) - messages.length),
-        updatedAt:
-          remaining.length > 1
-            ? remaining[1].createdAt
-            : convo.createdAt,
-        pinned: convo.pinned,
-        pinnedAt: convo.pinnedAt,
-        projectId: convo.projectId,
-        title: convo.title,
-        titleAuto: convo.titleAuto,
-        renamedAt: convo.renamedAt,
-        deletedAt: convo.deletedAt,
-        deleted: convo.deleted,
-      });
-    }
-
-    return { ok: true };
+    await deleteMessagesCascade(ctx, conversation._id);
+    await ctx.db.delete(conversation._id);
   },
 });
 
-// ─── projects ────────────────────────────────────────────────────────────────
+/* -------------------------------------------------------------------------- */
+/* Project mutations                                                           */
+/* -------------------------------------------------------------------------- */
 
 export const createProject = mutation({
   args: {
@@ -748,308 +836,150 @@ export const createProject = mutation({
     instructions: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const callerId = await getAuthUserId(ctx);
-    if (!callerId) throw new Error("Not signed in.");
-
-    const { effectiveUserId } = await effectiveUser(ctx, callerId);
-
-    const existing = await ctx.db
-      .query("projects")
-      .withIndex("by_user", (q) => q.eq("userId", effectiveUserId))
-      .filter((q) => q.eq(q.field("name"), args.name.trim()))
-      .first();
-
-    if (existing) throw new Error("A project with that name already exists.");
-
+    const userId = await requireWritableUser(ctx);
+    const name = cleanName(args.name);
+    if (!name) throw new Error("invalid-name");
     const now = Date.now();
-    const id = await ctx.db.insert("projects", {
-      userId: effectiveUserId,
-      name: args.name.trim(),
-      emoji: args.emoji ?? null,
-      instructions: args.instructions ?? null,
+    return await ctx.db.insert("projects", {
+      userId,
+      name,
+      emoji: args.emoji?.trim().slice(0, 16) || undefined,
+      instructions: args.instructions?.trim().slice(0, INSTRUCTIONS_MAX) || undefined,
       createdAt: now,
       updatedAt: now,
     });
-
-    return { id };
   },
 });
 
 export const renameProject = mutation({
-  args: {
-    projectId: v.id("projects"),
-    name: v.string(),
-  },
+  args: { projectId: v.id("projects"), name: v.string() },
   handler: async (ctx, args) => {
-    const callerId = await getAuthUserId(ctx);
-    if (!callerId) throw new Error("Not signed in.");
-
-    const { effectiveUserId } = await effectiveUser(ctx, callerId);
-
-    const project = await ctx.db.get(args.projectId);
-    if (!project || project.userId !== effectiveUserId) {
-      throw new Error("Project not found.");
-    }
-
-    const trimmed = args.name.trim();
-    if (trimmed.length === 0)
-      throw new Error("Project name must not be empty.");
-
-    const conflict = await ctx.db
-      .query("projects")
-      .withIndex("by_user", (q) => q.eq("userId", effectiveUserId))
-      .filter(
-        (q) =>
-          q.and(
-            q.neq(q.field("_id"), args.projectId),
-            q.eq(q.field("name"), trimmed),
-          ),
-      )
-      .first();
-
-    if (conflict)
-      throw new Error("A project with that name already exists.");
-
-    await ctx.db.patch(args.projectId, {
-      name: trimmed,
-      updatedAt: Date.now(),
-    });
-
+    const userId = await requireWritableUser(ctx);
+    const project = await ownedProject(ctx, userId, args.projectId);
+    if (!project) throw new Error("not-found");
+    const name = cleanName(args.name);
+    if (!name) throw new Error("invalid-name");
+    await ctx.db.patch(project._id, { name, updatedAt: Date.now() });
     return { ok: true };
   },
 });
 
+/** Edit the emoji and/or the project's own instructions note. */
 export const updateProject = mutation({
   args: {
     projectId: v.id("projects"),
-    emoji: v.optional(v.string()),
-    instructions: v.optional(v.string()),
+    emoji: v.optional(v.union(v.string(), v.null())),
+    instructions: v.optional(v.union(v.string(), v.null())),
   },
   handler: async (ctx, args) => {
-    const callerId = await getAuthUserId(ctx);
-    if (!callerId) throw new Error("Not signed in.");
-
-    const { effectiveUserId } = await effectiveUser(ctx, callerId);
-
-    const project = await ctx.db.get(args.projectId);
-    if (!project || project.userId !== effectiveUserId) {
-      throw new Error("Project not found.");
+    const userId = await requireWritableUser(ctx);
+    const project = await ownedProject(ctx, userId, args.projectId);
+    if (!project) throw new Error("not-found");
+    const patch: Partial<Doc<"projects">> = { updatedAt: Date.now() };
+    if (args.emoji !== undefined) {
+      patch.emoji =
+        args.emoji === null ? undefined : args.emoji.trim().slice(0, 16) || undefined;
     }
-
-    await ctx.db.patch(args.projectId, {
-      emoji: args.emoji !== undefined
-        ? args.emoji == null
-          ? null
-          : args.emoji
-        : undefined,
-      instructions: args.instructions !== undefined
-        ? args.instructions == null
-          ? null
-          : args.instructions
-        : undefined,
-      updatedAt: Date.now(),
-    });
-
+    if (args.instructions !== undefined) {
+      patch.instructions =
+        args.instructions === null
+          ? undefined
+          : args.instructions.trim().slice(0, INSTRUCTIONS_MAX) || undefined;
+    }
+    await ctx.db.patch(project._id, patch);
     return { ok: true };
   },
 });
 
+/**
+ * Delete a project. Its chats either move back to "Chats" (mode "move") or
+ * are deleted together with it (mode "delete"). The caller confirms the
+ * exact chat count first.
+ */
 export const deleteProject = mutation({
   args: {
     projectId: v.id("projects"),
     mode: v.union(v.literal("move"), v.literal("delete")),
   },
   handler: async (ctx, args) => {
-    const callerId = await getAuthUserId(ctx);
-    if (!callerId) throw new Error("Not signed in.");
-
-    const { effectiveUserId } = await effectiveUser(ctx, callerId);
-
-    const project = await ctx.db.get(args.projectId);
-    if (!project || project.userId !== effectiveUserId) {
-      throw new Error("Project not found.");
-    }
-
+    const userId = await requireWritableUser(ctx);
+    const project = await ownedProject(ctx, userId, args.projectId);
+    if (!project) throw new Error("not-found");
     const conversations = await ctx.db
       .query("conversations")
       .withIndex("by_user_project", (q) =>
-        q.eq("userId", effectiveUserId).eq("projectId", args.projectId),
+        q.eq("userId", userId).eq("projectId", args.projectId),
       )
-      .collect();
-
-    const affected = conversations.length;
-
-    if (args.mode === "delete") {
-      for (const c of conversations) {
-        await ctx.db.delete(c._id);
-
-        const messages = await ctx.db
-          .query("ashyMessages")
-          .withIndex("by_conversation", (q) =>
-            q.eq("conversationId", c._id),
-          )
-          .collect();
-
-        for (const m of messages) {
-          await ctx.db.delete(m._id);
-        }
+      .take(2000);
+    let affected = 0;
+    for (const conversation of conversations) {
+      if (conversation.deleted) continue;
+      affected += 1;
+      if (args.mode === "move") {
+        await ctx.db.patch(conversation._id, { projectId: undefined });
+      } else {
+        await deleteMessagesCascade(ctx, conversation._id);
+        await ctx.db.delete(conversation._id);
       }
-
-      await ctx.db.delete(args.projectId);
-    } else {
-      for (const c of conversations) {
-        await ctx.db.patch(c._id, {
-          projectId: null,
-          updatedAt: Date.now(),
-        });
-      }
-    }
-
-    return { affected };
+    }      await ctx.db.delete(project._id);
+    return { ok: true, affected };
   },
 });
 
-// ─── admin audit (de-duplicated) ─────────────────────────────────────────────
+/* -------------------------------------------------------------------------- */
+/* Impersonation audit reports (the only writes allowed while read-only)      */
+/* -------------------------------------------------------------------------- */
 
-export const reportAshyHistoryViewed = mutation({
-  args: {},
-  handler: async (ctx) => {
-    const callerId = await getAuthUserId(ctx);
-    if (!callerId) throw new Error("Not signed in.");
-
-    const { effectiveUserId, isImpersonating } =
-      await effectiveUser(ctx, callerId);
-
-    if (!isImpersonating) return { ok: true };
-
-    const userId = await getAuthUserId(ctx);
-    if (!userId) return { ok: true };
-
-    await recordAdminAuditIfDue(
-      ctx,
-      userId,
-      effectiveUserId,
-      "view_ashy_history",
-    );
-
-    return { ok: true };
-  },
-});
-
+/**
+ * The client reports that an admin opened one of the target's chats. This is
+ * the audit trail itself, so it is allowed during a read-only session; the
+ * entry is de-duplicated server-side (one per admin+target+chat per 10 min)
+ * and stores ids and timestamps only — never titles or message text. The chat
+ * must actually belong to the impersonation target.
+ */
 export const reportAshyChatOpened = mutation({
-  args: {
-    conversationId: v.id("conversations"),
-  },
+  args: { conversationId: v.id("conversations") },
   handler: async (ctx, args) => {
-    const callerId = await getAuthUserId(ctx);
-    if (!callerId) throw new Error("Not signed in.");
-
-    const { effectiveUserId, isImpersonating } =
-      await effectiveUser(ctx, callerId);
-
-    if (!isImpersonating) return { ok: true };
-
-    const userId = await getAuthUserId(ctx);
-    if (!userId) return { ok: true };
-
+    const callerId = await requireUser(ctx);
+    const { effectiveUserId, isImpersonating } = await getEffectiveUser(
+      ctx,
+      callerId,
+    );
+    if (!isImpersonating) return { ok: true }; // nothing to audit
+    const conversation = await ctx.db.get(args.conversationId);
+    if (!conversation || conversation.userId !== effectiveUserId) {
+      return { ok: true };
+    }
     await recordAdminAuditIfDue(
       ctx,
-      userId,
+      callerId,
       effectiveUserId,
       "view_ashy_chat",
       args.conversationId,
     );
-
     return { ok: true };
   },
 });
 
-// ─── helpers ─────────────────────────────────────────────────────────────────
-
-function notDeleted(c: Doc<"conversations">): boolean {
-  return c.deleted !== true;
-}
-
-function toChatRow(c: Doc<"conversations">) {
-  return {
-    _id: c._id,
-    title: c.title,
-    pinned: (c.pinned ?? false) as boolean,
-    projectId: (c.projectId ?? null) as Id<"projects"> | null,
-    updatedAt: c.updatedAt,
-    messageCount: (c.messageCount ?? 0) as number,
-  };
-}
-
-type MessageRow = Doc<"ashyMessages">;
-type ResolvedMessage = {
-  id: string;
-  role: "user" | "assistant";
-  text: string;
-  images?: Array<{ mimeType: string; url: string | null }>;
-  error?: "unauthorized" | "quota" | "unavailable" | "blocked" | "invalidImage";
-  videos?:
-    | Array<{
-        videoId: string;
-        title: string;
-        channel: string;
-        thumbnail: string;
-        durationLabel: string;
-      }>
-    | undefined;
-  videoSearch?:
-    | {
-        query: string;
-        ok: false;
-        message: string;
-      }
-    | undefined;
-  sources?:
-    | Array<{ title: string; url: string; domain: string }>
-    | undefined;
-  searchQueries?: string[] | undefined;
-  searchNotice?: string | undefined;
-  searchNoticeKind?:
-    | "userLimit"
-    | "providerQuota"
-    | "other"
-    | undefined;
-  grounded?: boolean | undefined;
-  searchEntryPointUrl?: string | undefined;
-  chips?: string[] | undefined;
-  planMissions?: { itemIds: string[]; labels: string[] } | undefined;
-};
-
-function resolveMessage(
-  ctx: any,
-): (m: MessageRow) => Promise<ResolvedMessage> {
-  return async (m) => {
-    const images =
-      m.images != null
-        ? await Promise.all(
-            m.images.map(async (img) => ({
-              mimeType: img.mimeType,
-              url: await ctx.storage.getUrl(img.storageId),
-            })),
-          )
-        : undefined;
-
-    return {
-      id: m.clientMessageId,
-      role: m.role,
-      text: m.text,
-      images,
-      error: m.errorKind ?? undefined,
-      videos: m.videos ?? undefined,
-      videoSearch: m.videoSearch ?? undefined,
-      sources: m.sources ?? undefined,
-      searchQueries: m.searchQueries ?? undefined,
-      searchNotice: m.searchNotice ?? undefined,
-      searchNoticeKind: m.searchNoticeKind ?? undefined,
-      grounded: m.grounded ?? undefined,
-      searchEntryPointUrl: m.searchEntryPointUrl ?? undefined,
-      chips: m.chips ?? undefined,
-      planMissions: m.planMissions ?? undefined,
-    };
-  };
-}
+/**
+ * The client reports that the admin is browsing the target's chat history.
+ * De-duplicated the same way (one entry per admin+target per 10 min).
+ */
+export const reportAshyHistoryViewed = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const callerId = await requireUser(ctx);
+    const { effectiveUserId, isImpersonating } = await getEffectiveUser(
+      ctx,
+      callerId,
+    );
+    if (!isImpersonating) return { ok: true }; // nothing to audit
+    await recordAdminAuditIfDue(
+      ctx,
+      callerId,
+      effectiveUserId,
+      "view_ashy_history",
+    );
+    return { ok: true };
+  },
+});

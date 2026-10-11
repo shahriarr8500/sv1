@@ -323,19 +323,21 @@ export const chat = action({
     const identity = await getAuthUserId(ctx);
     if (identity === null) return fail("unauthorized");
 
+    // Read-only while an admin is viewing another student's account: no sends,
+    // no Gemini call, no YouTube search and no web search on the student's
+    // behalf. The session is re-resolved from the DB here, on the server — the
+    // client cannot bypass this gate.
+    const { isImpersonating } = await ctx.runQuery(
+      internal.impersonation.getEffectiveUserForAction,
+      { callerId: identity },
+    );
+    if (isImpersonating) return fail("readOnly");
+
     const key = process.env.GEMINI_API_KEY?.trim();
     if (!key) {
       console.error("[ashy] GEMINI_API_KEY is not set on this deployment.");
       return fail("unavailable");
     }
-
-    // Read-only while an admin is viewing another student's account: no sends,
-    // no Gemini call, no YouTube search and no web search on the student's behalf.
-    const { isImpersonating: impersonating } =
-      await ctx.runQuery(internal.impersonation.getEffectiveUser, {
-        callerId: identity,
-      });
-    if (impersonating) return fail("readOnly");
 
     // --- Conversation history -------------------------------------------
     // With a conversationId the chat is persisted server-side: the outgoing
