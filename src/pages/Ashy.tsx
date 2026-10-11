@@ -345,8 +345,7 @@ export default function AshyPage() {
 
   /* --- messages: server truth + local overlay --------------------------- */
   const serverMessages = conversation?.messages;
-  const messages = useMemo(() => {
-    const base: AshyMessage[] = (serverMessages ?? []).map((message) => ({
+  const messages = useMemo(() => {  const base: AshyMessage[] = (serverMessages ?? []).map((message) => ({
       ...message,
       role: message.role,
     }));
@@ -356,9 +355,8 @@ export default function AshyPage() {
     return [...base, ...localList.filter((message) => !serverIds.has(message.id))];
   }, [serverMessages, pending, activeId]);
 
-  const activeProject = conversation?.projectId
-    ? (projects.find((project) => project.id === conversation.projectId) ??
-      null)
+  const activeProject = conversation?.projectId != null
+    ? (projects.find((project) => project.id === conversation.projectId) ?? null)
     : null;
   const newChatProject = openProjectId
     ? (projects.find((project) => project.id === openProjectId) ?? null)
@@ -368,7 +366,7 @@ export default function AshyPage() {
   const busyForActive = busy && busyConvId === activeId;
   const conversationLoading = activeId !== null && conversation === undefined;
 
-  // Read-only while an admin is viewing another student's account: every write
+// Read-only while an admin is viewing another student's account: every write
   // path is blocked on the backend, and the UI reflects that so the admin has
   // no expectation they can edit the student's chats.
   const readOnly =
@@ -770,7 +768,7 @@ export default function AshyPage() {
 
         // Normal send: ensure a conversation exists first (a new chat is
         // created on the first message, inside the open project if any).
-        let conversationId: ConvId | null = activeId;
+        let conversationId = activeId;
         if (!conversationId) {
           conversationId = await createConversationMut({
             projectId: openProjectId ? asProjId(openProjectId) : undefined,
@@ -799,7 +797,7 @@ export default function AshyPage() {
         setBusyConvId(conversationId);
         await runRequest(
           {
-            conversationId,
+            conversationId: conversationId,
             clientMessageId: userMessage.id,
             text,
             image,
@@ -999,7 +997,7 @@ export default function AshyPage() {
         });
         if (input.moveChatId) {
           await moveChatMut({
-            conversationId: asConvId(input.moveChatId),
+            conversationId: input.moveChatId as Id<"conversations">,
             projectId,
           });
           if (input.moveChatId === activeId) setOpenProjectId(projectId);
@@ -1253,10 +1251,10 @@ export default function AshyPage() {
       );
     },
     onUpdateProject: (
-      id: string,
+      id: Id<"projects">,
       patch: { emoji?: string | null; instructions?: string | null },
     ) => {
-      void updateProjectMut({ projectId: asProjId(id), ...patch }).catch(() =>
+      void updateProjectMut({ projectId: id, ...patch }).catch(() =>
         toast("Couldn't update that project"),
       );
     },
@@ -1339,7 +1337,7 @@ export default function AshyPage() {
         <ChatHeader
           title={title}
           hasChat={hasChat}
-          pinned={conversation?.pinned ?? false}
+          pinned={conversation?.pinned != null ? conversation.pinned : false}
           project={activeProject}
           projects={projects}
           panelOpen={panelOpen}
@@ -1355,7 +1353,7 @@ export default function AshyPage() {
           onNewChat={startNewChat}
           onRenameChat={renameActiveChat}
           onTogglePin={() =>
-            activeId && togglePin(activeId, !(conversation?.pinned ?? false))
+            activeId && togglePin(activeId, conversation?.pinned != null ? conversation.pinned : false)
           }
           onMoveChat={(projectId) => activeId && moveChat(activeId, projectId)}
           onNewProjectForChat={() =>
