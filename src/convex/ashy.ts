@@ -70,7 +70,6 @@ import {
   MAX_IMAGES_TOTAL,
   MAX_PDF_BYTES,
   MAX_PDF_CHARS,
-  MAX_PDF_PAGES,
   MAX_PDFS_PER_MESSAGE,
   PDF_MIME_TYPE,
   detectImageMimeFromBase64,
@@ -249,6 +248,10 @@ Images:
 - Keep answering follow-up questions about an image already in the conversation as if it were still in front of you.
 - When a photo is attached, web search is skipped automatically — answer from the photo and your knowledge.
 
+Documents (PDF):
+- Students can attach PDF notes, worksheets or textbook excerpts. When a document's pages are part of this message, read them like paper in front of you and answer from them.
+- The file itself is NOT re-sent with every later message. Older messages may only note which document was attached. If a follow-up genuinely needs the file's contents and they are not in this conversation, say so plainly and tell the student to tap "Ask about document" on the message where they uploaded it — never claim you cannot open files.
+
 Progress awareness:
 - You have the student's real Student OS progress summary in this context: syllabus completion overall and per subject/paper, recent completions, weakest and untouched areas, the next uncompleted topic, and study time and streak when tracked.
 - When asked about progress, answer with the real numbers from the summary, name their strengths and weakest areas, and suggest the next topic toward their stated goal (for example the BUET admission target). Be motivating but honest.
@@ -322,6 +325,13 @@ export const chat = action({
     requestKind: v.optional(
       v.union(v.literal("ask"), v.literal("transcribe")),
     ),
+    /**
+     * Phase 2: "Ask about document" — re-read an ALREADY-UPLOADED PDF for
+     * this one question. The id must appear in a message row of this very
+     * conversation (ownership is verified server-side), so no other student's
+     * file can ever be hydrated this way.
+     */
+    contextPdf: v.optional(v.object({ storageId: v.id("_storage") })),
     /** "send" persists the message; "regenerate" only re-answers. */
     mode: v.optional(v.union(v.literal("send"), v.literal("regenerate"))),
     /** Student's local answer-length preference (advisory, never overrides). */
@@ -349,6 +359,7 @@ export const chat = action({
       images?: ChatImage[];
       pdfs?: PdfAttachment[];
       requestKind?: "ask" | "transcribe";
+      contextPdf?: { storageId: Id<"_storage"> };
       mode?: "send" | "regenerate";
       answerLength?: "concise" | "balanced" | "detailed";
       context?: string;
@@ -393,6 +404,28 @@ export const chat = action({
       // deleted) conversation is indistinguishable from a missing one.
       if (!chatCtx) return fail("unauthorized");
       projectNote = chatCtx.note;
+
+      // Phase 2: "Ask about document" — hydrate a previously-uploaded PDF
+      // for this one question, after proving it belongs to this conversation.
+      let contextPdfs: ChatPdf[] = [];
+      if (args.contextPdf) {
+        const ref = chatCtx.rows
+          .flatMap((row) => row.pdfs)
+          .find((pdf) => pdf.storageId === args.contextPdf!.storageId);
+        if (!ref) return fail("unauthorized"); // not yours / not in this chat
+        try {
+          const blob = await ctx.storage.get(args.contextPdf.storageId);
+          if (blob) {
+            const bytes = Buffer.from(await blob.arrayBuffer());
+            if (bytes.length > 0 && bytes.length <= MAX_PDF_BYTES) {
+              contextPdfs = [{ name: ref.name, data: bytes.toString("base64") }];
+            }
+          }
+        } catch {
+          contextPdfs = []; // fall through to the friendly failure below
+        }
+        if (contextPdfs.length === 0) return fail("invalidPdf");
+      }
 
       let currentTurn: ChatTurn | null = null;
       if (args.mode !== "regenerate") {
@@ -570,11 +603,17 @@ export const chat = action({
         const rowPdfs = row.pdfs;
         if (rowPdfs.length > 0) {
           const names = rowPdfs.map((pdf) => pdf.name).join(", ");
-          const regenTarget =
-            args.mode === "regenerate" &&
+          // Bytes are re-hydrated only for the question being answered right
+          // now: Regenerate re-answers the newest stored question, and a
+          // retried send re-sends the exact message it belongs to.
+          const answeringNow =
             row.role === "user" &&
-            row.clientMessageId === lastUserRowId;
-          if (regenTarget) {
+            ((args.mode === "regenerate" &&
+              row.clientMessageId === lastUserRowId) ||
+              (args.mode !== "regenerate" &&
+                args.clientMessageId !== undefined &&
+                row.clientMessageId === args.clientMessageId));
+          if (answeringNow) {
             const hydratedPdfs: ChatPdf[] = [];
             for (const pdf of rowPdfs) {
               if (pdf.size > MAX_PDF_BYTES) continue; // too big to re-read
@@ -601,6 +640,16 @@ export const chat = action({
         history.push(turn);
       }
       if (currentTurn) history.push(currentTurn);
+      // Attach the re-read document to the current question (once — fresh
+      // uploads already carry their own bytes, so no duplication).
+      if (contextPdfs.length > 0 && !history.some((turn) => turn.pdfs?.length)) {
+        const target = history[history.length - 1];
+        if (target) {
+          target.pdfs = [...(target.pdfs ?? []), ...contextPdfs];
+        } else {
+          history.push({ role: "user", text: "", pdfs: contextPdfs });
+        }
+      }
     } else {
       history = args.history ?? [];
     }
@@ -834,6 +883,17 @@ export const chat = action({
         "Web search was skipped for this question because photos can't be combined with the search tool — this answer is from Ashy's own knowledge.";
       searchNoticeKind = "other";
     }
+    if (grounding && hasDocument) {
+      // Same constraint applies to whole-document input.
+      grounding = false;
+      searchNotice =
+        "Web search was skipped for this question because a document is attached — this answer is from the document and Ashy's own knowledge.";
+      searchNoticeKind = "other";
+    }
+    if (grounding && transcribing) {
+      // A transcription is produced from the attachment alone.
+      grounding = false;
+    }
     const searchDay = dayKeyNow();
     if (grounding && Date.now() < groundingPausedUntil) {
       grounding = false;
@@ -929,8 +989,11 @@ export const chat = action({
       },
       contents: cleanContents,
       // Plan replies must stick to the given numbers; a lower temperature
-      // makes re-rounding or improvising far less likely.
-      generationConfig: { temperature: planContext ? 0.2 : 0.6 },
+      // makes re-rounding or improvising far less likely. Transcription
+      // needs the same steadiness — fidelity, not creativity.
+      generationConfig: {
+        temperature: transcribing || planContext ? 0.2 : 0.6,
+      },
     };
     if (grounding) body.tools = [{ google_search: {} }];
 
@@ -956,7 +1019,8 @@ export const chat = action({
               "x-goog-api-key": key,
             },
             body: JSON.stringify(body),
-            signal: AbortSignal.timeout(60_000),
+            // Whole-document requests legitimately take longer to process.
+            signal: AbortSignal.timeout(hasDocument ? 120_000 : 60_000),
           },
         );
       } catch (error) {
@@ -1161,7 +1225,8 @@ export const chat = action({
     // --- Phase 3: turn [[video: "…"]] markers into real results ------------
     const { clean, queries } = extractVideoQueries(rawText);
     // C4: never attach videos to plan/progress answers — strip any markers.
-    const effectiveQueries = planningReply ? [] : queries;
+    // Transcriptions are pure transcription — no videos either.
+    const effectiveQueries = planningReply || transcribing ? [] : queries;
     const videos: VideoResult[] = [];
     let videoSearch: VideoSearchFailure | undefined;
     if (effectiveQueries.length > 0) {
@@ -1217,6 +1282,16 @@ export const chat = action({
       if (planMissions) result.planMissions = planMissions;
       if (grounded) result.grounded = true;
       if (searchEntryPointUrl) result.searchEntryPointUrl = searchEntryPointUrl;
+      if (transcribing) {
+        // Follow-up actions for a fresh transcription — inserted into the
+        // composer when clicked, like every other quick-reply chip.
+        result.chips = [
+          "Explain this",
+          "Summarize it",
+          "Make revision notes",
+          "Generate practice questions",
+        ];
+      }
     }
     return result;
 

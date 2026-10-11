@@ -396,7 +396,12 @@ export function validatePdfAttachment(
 /** Display filename: path-free, bounded, never empty. */
 export function sanitizePdfName(raw: string): string {
   const base = raw.split(/[\\/]/).pop() ?? "";
-  const clean = base.replace(/[\u0000-\u001f]/g, "").trim().slice(0, 120);
+  let clean = "";
+  for (const char of base) {
+    // Strip control characters without a control-char regex.
+    if (char.charCodeAt(0) >= 32) clean += char;
+  }
+  clean = clean.trim().slice(0, 120);
   return clean || "document.pdf";
 }
 

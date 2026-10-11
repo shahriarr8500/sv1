@@ -24,6 +24,7 @@ import {
   ArrowDown,
   Copy,
   Crop,
+  FileText,
   Globe,
   Image as ImageIcon,
   ImagePlus,
@@ -31,6 +32,7 @@ import {
   Mic,
   Paperclip,
   Pencil,
+  PenLine,
   RefreshCw,
   Send,
   Sparkles,
@@ -81,10 +83,18 @@ import {
 import {
   ACCEPTED_IMAGE_MIME_TYPES,
   IMAGE_REJECTION_COPY,
+  MAX_PDF_BYTES,
+  PDF_MIME_TYPE,
+  PDF_REJECTION_COPY,
+  decodeBase64,
   detectImageMimeFromBase64,
+  formatFileSize,
   isAcceptedImageMime,
   mimeTypeFromDataUrl,
+  sanitizePdfName,
+  validatePdfBytes,
 } from "@/lib/ashy-attachments";
+import { PdfViewer } from "@/components/ashy/PdfViewer";
 import {
   ASHY_FAILURE_COPY,
   ASHY_STARTERS,
@@ -235,6 +245,42 @@ export default function AshyPage() {
   const [pendingImage, setPendingImage] = useState<string | null>(
     () => loadAshyDraft(activeId)?.imageData ?? null,
   );
+  /** Phase 2: one pending PDF (draft-restored like the image attachment). */
+  const [pendingPdf, setPendingPdf] = useState<{
+    name: string;
+    size: number;
+    dataUrl: string;
+  } | null>(() => {
+    const stored = loadAshyDraft(activeId);
+    return stored?.pdfDataUrl && stored.pdfName
+      ? {
+          name: stored.pdfName,
+          size: stored.pdfSize ?? 0,
+          dataUrl: stored.pdfDataUrl,
+        }
+      : null;
+  });
+  /** Open PDF reader (local draft data URL or a saved message's URL). */
+  const [pdfViewer, setPdfViewer] = useState<{
+    src: string;
+    name: string;
+    size?: number;
+  } | null>(null);
+  /**
+   * Phase 2: rendered PDF pages waiting to be asked about ("Ask about page
+   * 3" in the reader). Stored as JPEG data URLs and sent through the normal
+   * image pipeline — large documents are answered page-by-page, never
+   * re-uploaded whole.
+   */
+  const [pendingPages, setPendingPages] = useState<{
+    label: string;
+    images: string[];
+  } | null>(() => {
+    const stored = loadAshyDraft(activeId);
+    return stored?.pagesImages?.length
+      ? { label: stored.pagesLabel ?? "Selected pages", images: stored.pagesImages }
+      : null;
+  });
   const [cropOpen, setCropOpen] = useState(false);
   const [cropSrc, setCropSrc] = useState<string | null>(null);
   const [cropFromCamera, setCropFromCamera] = useState(false);
@@ -312,12 +358,16 @@ export default function AshyPage() {
     conversationId: string;
     clientMessageId: string;
     text: string;
-    image: { mimeType: string; data: string } | null;
+    images: Array<{ mimeType: string; data: string }> | null;
+    pdf: { name: string; size: number; data: string } | null;
+    requestKind: "ask" | "transcribe";
+    contextPdfStorageId?: string | null;
   } | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const atBottomRef = useRef(true);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const captureInputRef = useRef<HTMLInputElement | null>(null);
+  const pdfInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const desktopPanelRef = useRef<HistoryPanelHandle | null>(null);
   const mobilePanelRef = useRef<HistoryPanelHandle | null>(null);
@@ -356,9 +406,6 @@ export default function AshyPage() {
     const base: AshyMessage[] = (serverMessages ?? []).map((message) => ({
       ...message,
       role: message.role,
-      // Failure kinds arrive typed from the Convex schema; they match the
-      // client's AshyFailureKind union exactly (see src/lib/ashy.ts).
-      error: message.error as AshyMessage["error"],
     }));
     const localList = activeId ? (pending[activeId] ?? []) : [];
     if (localList.length === 0) return base;
@@ -487,6 +534,23 @@ export default function AshyPage() {
       const stored = loadAshyDraft(id);
       setDraft(stored?.text ?? "");
       setPendingImage(stored?.imageData ?? null);
+      setPendingPdf(
+        stored?.pdfDataUrl && stored.pdfName
+          ? {
+              name: stored.pdfName,
+              size: stored.pdfSize ?? 0,
+              dataUrl: stored.pdfDataUrl,
+            }
+          : null,
+      );
+      setPendingPages(
+        stored?.pagesImages?.length
+          ? {
+              label: stored.pagesLabel ?? "Selected pages",
+              images: stored.pagesImages,
+            }
+          : null,
+      );
       setPreviewLarge(false);
       setEditingId(null);
       setSearchParams(
@@ -523,8 +587,13 @@ export default function AshyPage() {
     saveAshyDraft(activeId, {
       text: draft,
       imageData: pendingImage ?? undefined,
+      pdfDataUrl: pendingPdf?.dataUrl,
+      pdfName: pendingPdf?.name,
+      pdfSize: pendingPdf?.size,
+      pagesLabel: pendingPages?.label,
+      pagesImages: pendingPages?.images,
     });
-  }, [draft, pendingImage, activeId]);
+  }, [draft, pendingImage, pendingPdf, pendingPages, activeId]);
 
   useEffect(() => {
     saveAshyPrefs(prefs);
@@ -626,7 +695,13 @@ export default function AshyPage() {
         conversationId: string;
         clientMessageId?: string;
         text?: string;
-        image?: { mimeType: string; data: string } | null;
+        images?: Array<{ mimeType: string; data: string }> | null;
+        /** Phase 2: the pending PDF's bytes (validated before upload). */
+        pdf?: { name: string; size: number; data: string } | null;
+        /** Phase 2: "ask" (default) or handwritten-note transcription. */
+        requestKind?: "ask" | "transcribe";
+        /** Phase 2: re-read an ALREADY-UPLOADED document for one question. */
+        contextPdfStorageId?: string | null;
         mode: "send" | "regenerate";
       },
       myRequest: number,
@@ -635,7 +710,17 @@ export default function AshyPage() {
         conversationId: asConvId(params.conversationId),
         clientMessageId: params.clientMessageId,
         text: params.text,
-        images: params.image ? [params.image] : undefined,
+        images:
+          params.images && params.images.length > 0
+            ? params.images
+            : undefined,
+        pdfs: params.pdf ? [params.pdf] : undefined,
+        requestKind: params.requestKind,
+        contextPdf: params.contextPdfStorageId
+          ? {
+              storageId: params.contextPdfStorageId as Id<"_storage">,
+            }
+          : undefined,
         mode: params.mode,
         context,
         searchMode,
@@ -685,7 +770,7 @@ export default function AshyPage() {
           id: newId(),
           role: "assistant",
           text: "",
-          error: result.kind as AshyMessage["error"],
+          error: result.kind,
         });
       }
     },
@@ -693,21 +778,56 @@ export default function AshyPage() {
   );
 
   const sendMessage = useCallback(
-    async (overrideText?: string) => {
+    async (
+      overrideText?: string,
+      requestKind: "ask" | "transcribe" = "ask",
+      contextPdfStorageId?: string | null,
+    ) => {
       if (busy) return;
       const text = (overrideText ?? draft).trim();
       // The declared type is derived from the data URL itself (the cropper
       // re-encodes to JPEG; older drafts may hold PNG/WebP). The backend
       // re-derives the MIME from the bytes anyway — this is for consistency.
-      const image = pendingImage
-        ? {
-            mimeType: mimeTypeFromDataUrl(pendingImage),
-            data: stripDataUrlPrefix(pendingImage),
-          }
+      const images: Array<{ mimeType: string; data: string }> = [];
+      if (pendingImage) {
+        images.push({
+          mimeType: mimeTypeFromDataUrl(pendingImage),
+          data: stripDataUrlPrefix(pendingImage),
+        });
+      }
+      // Phase 2: rendered PDF pages ride the same image pipeline.
+      for (const dataUrl of pendingPages?.images ?? []) {
+        images.push({
+          mimeType: mimeTypeFromDataUrl(dataUrl),
+          data: stripDataUrlPrefix(dataUrl),
+        });
+      }
+      // Phase 2: the pending PDF's bytes, re-checked client-side right before
+      // the send (the file could be a restored draft from a stale session).
+      const pdf = pendingPdf
+        ? (() => {
+            const data = stripDataUrlPrefix(pendingPdf.dataUrl);
+            const check = validatePdfBytes(decodeBase64(data), pendingPdf.size);
+            if (!check.ok) {
+              toast("Couldn't send that PDF", {
+                description: PDF_REJECTION_COPY[check.reason],
+              });
+              return undefined;
+            }
+            return { name: pendingPdf.name, size: pendingPdf.size, data };
+          })()
         : null;
-      if (!text && !image) {
+      if (pendingPdf && !pdf) return; // rejection toast already shown
+      if (!text && images.length === 0 && !pdf) {
         toast("Nothing to send yet", {
-          description: "Type a question or attach an image first.",
+          description: "Type a question, or attach an image or PDF first.",
+        });
+        return;
+      }
+      if (requestKind === "transcribe" && images.length === 0 && !pdf) {
+        toast("Attach the notes first", {
+          description:
+            "Transcription works from a photo or a PDF of your handwritten notes.",
         });
         return;
       }
@@ -732,6 +852,8 @@ export default function AshyPage() {
           setEditingId(null);
           setDraft("");
           setPendingImage(null);
+          setPendingPdf(null);
+          setPendingPages(null);
           setPreviewLarge(false);
           saveAshyDraft(conversationId, null);
           if (requestIdRef.current !== myRequest) return;
@@ -754,17 +876,25 @@ export default function AshyPage() {
           id: newId(),
           role: "user",
           text,
-          images: image ? [image] : undefined,
+          images: images.length > 0 ? images : undefined,
+          // Optimistic PDF chip (name + size); the bytes go through the
+          // chat action, never through the message document.
+          pdfs: pdf ? [{ name: pdf.name, size: pdf.size }] : undefined,
         };
         addPending(conversationId, userMessage);
         lastSendRef.current = {
           conversationId,
           clientMessageId: userMessage.id,
           text,
-          image,
+          images: images.length > 0 ? images : null,
+          pdf: pdf ?? null,
+          requestKind,
+          contextPdfStorageId: contextPdfStorageId ?? null,
         };
         setDraft("");
         setPendingImage(null);
+        setPendingPdf(null);
+        setPendingPages(null);
         setPreviewLarge(false);
         saveAshyDraft(conversationId, null);
         if (requestIdRef.current !== myRequest) return;
@@ -774,7 +904,10 @@ export default function AshyPage() {
             conversationId,
             clientMessageId: userMessage.id,
             text,
-            image,
+            images,
+            pdf,
+            requestKind,
+            contextPdfStorageId,
             mode: "send",
           },
           myRequest,
@@ -804,6 +937,8 @@ export default function AshyPage() {
       busy,
       draft,
       pendingImage,
+      pendingPdf,
+      pendingPages,
       activeId,
       editingId,
       openProjectId,
@@ -1077,6 +1212,59 @@ export default function AshyPage() {
     },
     [],
   );
+
+  /* --- upload PDF (Phase 2) ---------------------------------------------- */
+
+  const openPdfPicker = useCallback(() => {
+    const input = pdfInputRef.current;
+    if (!input) return;
+    input.value = "";
+    input.click();
+  }, []);
+
+  const choosePdf = useCallback(() => {
+    setAttachOpen(false);
+    openPdfPicker();
+  }, [openPdfPicker]);
+
+  const handlePdfFile = useCallback(async (file: File | undefined) => {
+    if (!file) return; // student cancelled the picker
+    // The extension/type is a hint only — the bytes decide, below.
+    const looksLikePdf =
+      file.type === PDF_MIME_TYPE || /\.pdf$/i.test(file.name);
+    if (!looksLikePdf) {
+      toast("Unsupported file", {
+        description: "Please choose a PDF document.",
+      });
+      return;
+    }
+    if (file.size > MAX_PDF_BYTES) {
+      toast("PDF too large", { description: PDF_REJECTION_COPY.tooLarge });
+      return;
+    }
+    try {
+      const dataUrl = await readImageFile(file);
+      const check = validatePdfBytes(
+        decodeBase64(stripDataUrlPrefix(dataUrl)),
+        file.size,
+      );
+      if (!check.ok) {
+        toast("Couldn't open that PDF", {
+          description: PDF_REJECTION_COPY[check.reason],
+        });
+        return;
+      }
+      setPendingPdf({
+        name: sanitizePdfName(file.name),
+        size: file.size,
+        dataUrl,
+      });
+    } catch {
+      toast("Couldn't read that file", {
+        description: "Please try another PDF.",
+      });
+    }
+  }, []);
 
   /* --- take photo (camera) ------------------------------------------------ */
 
@@ -1493,6 +1681,66 @@ export default function AshyPage() {
                               ))}
                             </div>
                           ) : null}
+                          {message.pdfs?.length ? (
+                            <div className="flex flex-wrap justify-end gap-1.5">
+                              {message.pdfs.map((pdf, pdfIndex) => (
+                                <div
+                                  key={`${message.id}-pdf-${pdfIndex}`}
+                                  className="flex items-center gap-1.5 rounded-lg border bg-background px-2 py-1.5"
+                                >
+                                  <FileText
+                                    className="size-3.5 text-muted-foreground"
+                                    aria-hidden
+                                  />
+                                  <button
+                                    type="button"
+                                    disabled={!pdf.url}
+                                    onClick={() =>
+                                      pdf.url &&
+                                      setPdfViewer({
+                                        src: pdf.url,
+                                        name: pdf.name,
+                                        size: pdf.size,
+                                      })
+                                    }
+                                    className="max-w-48 cursor-pointer truncate text-xs font-medium text-foreground hover:underline disabled:cursor-default"
+                                    title={pdf.url ? "Open document" : pdf.name}
+                                  >
+                                    {pdf.name}
+                                  </button>
+                                  <span className="text-[11px] text-muted-foreground">
+                                    {formatFileSize(pdf.size)}
+                                  </span>
+                                </div>
+                              ))}
+                              {isLastUser &&
+                              !busy &&
+                              !readOnly &&
+                              message.pdfs.some((pdf) => pdf.storageId) ? (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-8 cursor-pointer gap-1 px-2 text-xs"
+                                  title="Send a question about this document again"
+                                  onClick={() => {
+                                    const withRef = message.pdfs?.find(
+                                      (pdf) => pdf.storageId,
+                                    );
+                                    if (withRef?.storageId) {
+                                      void sendMessage(
+                                        undefined,
+                                        "ask",
+                                        withRef.storageId,
+                                      );
+                                    }
+                                  }}
+                                >
+                                  <FileText className="size-3.5" aria-hidden />
+                                  Ask about document
+                                </Button>
+                              ) : null}
+                            </div>
+                          ) : null}
                           {message.text ? (
                             <div className="rounded-2xl rounded-tr-md bg-primary px-3.5 py-2.5 break-words whitespace-pre-wrap text-primary-foreground">
                               {message.text}
@@ -1825,6 +2073,91 @@ export default function AshyPage() {
           </div>
         ) : null}
 
+        {/* Phase 2: pending PDF attachment */}
+        {pendingPdf ? (
+          <div className="mb-2 flex items-center gap-2 rounded-xl border bg-card p-2.5">
+            <div className="grid size-10 shrink-0 place-items-center rounded-lg border bg-muted/50">
+              <FileText className="size-5 text-muted-foreground" aria-hidden />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-xs font-semibold text-foreground">
+                {pendingPdf.name}
+              </p>
+              <p className="truncate text-xs text-muted-foreground">
+                {formatFileSize(pendingPdf.size)} · Ready for questions
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 cursor-pointer text-xs"
+              onClick={() =>
+                setPdfViewer({
+                  src: pendingPdf.dataUrl,
+                  name: pendingPdf.name,
+                  size: pendingPdf.size,
+                })
+              }
+            >
+              Open
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 cursor-pointer text-xs"
+              onClick={choosePdf}
+              disabled={busy}
+            >
+              Replace
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 cursor-pointer px-2 text-xs"
+              aria-label="Remove PDF"
+              title="Remove PDF"
+              onClick={() => setPendingPdf(null)}
+            >
+              <X className="size-4" aria-hidden />
+            </Button>
+          </div>
+        ) : null}
+
+        {/* Phase 2: rendered PDF pages waiting to be asked about */}
+        {pendingPages ? (
+          <div className="mb-2 flex items-center gap-2 rounded-xl border bg-card p-2.5">
+            <div className="flex -space-x-1.5">
+              {pendingPages.images.slice(0, 3).map((dataUrl, index) => (
+                <img
+                  key={`${pendingPages.label}-${index}`}
+                  src={dataUrl}
+                  alt=""
+                  className="size-10 rounded-md border bg-background object-cover"
+                />
+              ))}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-xs font-semibold text-foreground">
+                {pendingPages.label}
+              </p>
+              <p className="truncate text-xs text-muted-foreground">
+                {pendingPages.images.length} page
+                {pendingPages.images.length === 1 ? "" : "s"} ready to ask about
+              </p>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 cursor-pointer px-2 text-xs"
+              aria-label="Remove selected pages"
+              title="Remove selected pages"
+              onClick={() => setPendingPages(null)}
+            >
+              <X className="size-4" aria-hidden />
+            </Button>
+          </div>
+        ) : null}
+
         {/* Compact context row: open-project chip + web-search toggle */}
         <div className="mb-1.5 flex h-8 items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-1.5">
@@ -1862,6 +2195,22 @@ export default function AshyPage() {
               </span>
             ) : null}
           </div>
+          {pendingImage || pendingPdf || pendingPages ? (
+            <button
+              type="button"
+              onClick={() => void sendMessage(undefined, "transcribe")}
+              disabled={busy || readOnly}
+              title={
+                readOnly
+                  ? "Read-only while viewing another student's account"
+                  : "Transcribe this attachment into editable text"
+              }
+              className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full border border-primary/40 bg-primary/10 px-2.5 py-1 text-[11px] font-medium text-primary transition-colors hover:bg-primary/15 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <PenLine className="size-3.5" aria-hidden />
+              Read handwritten notes
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={() =>
@@ -1919,6 +2268,19 @@ export default function AshyPage() {
               event.target.value = "";
             }}
           />
+          {/* Phase 2: PDF documents. */}
+          <input
+            ref={pdfInputRef}
+            type="file"
+            accept="application/pdf"
+            className="hidden"
+            tabIndex={-1}
+            aria-hidden="true"
+            onChange={(event) => {
+              void handlePdfFile(event.target.files?.[0]);
+              event.target.value = "";
+            }}
+          />
           <Popover open={attachOpen} onOpenChange={setAttachOpen}>
             <PopoverTrigger asChild>
               <Button
@@ -1953,6 +2315,15 @@ export default function AshyPage() {
                 >
                   <ImageIcon className="size-4 text-muted-foreground" aria-hidden />
                   Choose from gallery
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={choosePdf}
+                  className="flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                >
+                  <FileText className="size-4 text-muted-foreground" aria-hidden />
+                  Upload PDF
                 </button>
               </div>
             </PopoverContent>
@@ -2025,9 +2396,12 @@ export default function AshyPage() {
               aria-label={editingId ? "Save and resend" : "Send to Ashy"}
               title={editingId ? "Save and resend" : readOnly ? "Read-only while viewing another student's account" : "Send to Ashy"}
               className="shrink-0"
-              disabled={!draft.trim() && !pendingImage || readOnly}
+              disabled={
+                (!draft.trim() && !pendingImage && !pendingPdf && !pendingPages) ||
+                readOnly
+              }
             >
-              {draft.trim() || pendingImage ? (
+              {draft.trim() || pendingImage || pendingPdf || pendingPages ? (
                 <ArrowDown className="size-4" aria-hidden />
               ) : (
                 <Send className="size-4" aria-hidden />
@@ -2202,6 +2576,26 @@ export default function AshyPage() {
           openFilePicker();
         }}
       />
+
+      {/* Phase 2: PDF reader. Selected pages come back as ready-to-ask
+          images, so big documents are answered page-by-page. */}
+      {pdfViewer ? (
+        <PdfViewer
+          open
+          src={pdfViewer.src}
+          name={pdfViewer.name}
+          size={pdfViewer.size}
+          readOnly={readOnly}
+          onClose={() => setPdfViewer(null)}
+          onAskPages={(pageImages, label) => {
+            setPendingPages({ label, images: pageImages });
+            setPdfViewer(null);
+            toast("Pages attached", {
+              description: `${label} — type your question and send.`,
+            });
+          }}
+        />
+      ) : null}
 
       {/* ONE player instance for both modes. */}
       {player ? (

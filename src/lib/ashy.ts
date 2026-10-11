@@ -14,6 +14,9 @@ export type AshyFailureKind =
   | "unavailable"
   | "blocked"
   | "invalidImage"
+  | "invalidPdf"
+  | "encryptedPdf"
+  | "pdfTooManyPages"
   | "readOnly";
 
 export interface AshyImage {
@@ -25,11 +28,25 @@ export interface AshyImage {
   url?: string | null;
 }
 
+/** One PDF attachment (Phase 2): local draft data or a saved storage URL. */
+export interface AshyPdf {
+  /** Display filename (sanitized server-side before storage). */
+  name: string;
+  /** File size in bytes. */
+  size: number;
+  /** Storage id — lets "Ask about document" re-read it server-side. */
+  storageId?: string;
+  /** Signed storage URL for a saved PDF (messages from the server). */
+  url?: string | null;
+}
+
 export interface AshyMessage {
   id: string;
   role: "user" | "assistant";
   text: string;
   images?: AshyImage[];
+  /** Phase 2: PDF documents attached to this message. */
+  pdfs?: AshyPdf[];
   /** Set on assistant messages that represent a failure instead of an answer. */
   error?: AshyFailureKind;
   /** Real YouTube results the backend searched for (never invented). */
@@ -96,6 +113,12 @@ export const ASHY_FAILURE_COPY: Record<AshyFailureKind, string> = {
   blocked: "Ashy couldn't answer that. Try rephrasing your question a little.",
   invalidImage:
     "That image couldn't be read. Please attach it again as a PNG, JPEG or WebP and retry.",
+  invalidPdf:
+    "That PDF couldn't be read — it may be corrupt or not really a PDF. Please re-export it and try again.",
+  encryptedPdf:
+    "That PDF is password-protected. Remove the password (re-export it without one) and upload it again.",
+  pdfTooManyPages:
+    "That PDF has more than 80 pages, so it can't be sent whole. Open it and ask about a page range instead — Ashy reads selected pages at a time.",
   readOnly:
     "Viewing another student's account — Ashy is read-only right now.",
 };
@@ -309,6 +332,13 @@ export interface AshyDraft {
   text: string;
   /** Cropped attachment data-url kept for the conversation being drafted. */
   imageData?: string;
+  /** Phase 2: pending PDF kept for the conversation being drafted. */
+  pdfDataUrl?: string;
+  pdfName?: string;
+  pdfSize?: number;
+  /** Phase 2: rendered PDF pages waiting to be asked about. */
+  pagesLabel?: string;
+  pagesImages?: string[];
 }
 
 function draftKey(conversationId: string | null): string {
@@ -319,7 +349,17 @@ export function loadAshyDraft(conversationId: string | null): AshyDraft | null {
   const all = readJson(DRAFTS_KEY) as Record<string, AshyDraft> | null;
   const draft = all?.[draftKey(conversationId)];
   if (!draft || typeof draft.text !== "string") return null;
-  return { text: draft.text, imageData: draft.imageData };
+  return {
+    text: draft.text,
+    imageData: draft.imageData,
+    pdfDataUrl: draft.pdfDataUrl,
+    pdfName: draft.pdfName,
+    pdfSize: draft.pdfSize,
+    pagesLabel: draft.pagesLabel,
+    pagesImages: Array.isArray(draft.pagesImages)
+      ? draft.pagesImages.slice(0, 6)
+      : undefined,
+  };
 }
 
 export function saveAshyDraft(
@@ -327,8 +367,9 @@ export function saveAshyDraft(
   draft: AshyDraft | null,
 ): void {
   const all = (readJson(DRAFTS_KEY) as Record<string, AshyDraft> | null) ?? {};
-  if (draft && (draft.text || draft.imageData)) all[draftKey(conversationId)] = draft;
-  else delete all[draftKey(conversationId)];
+  if (draft && (draft.text || draft.imageData || draft.pdfDataUrl)) {
+    all[draftKey(conversationId)] = draft;
+  } else delete all[draftKey(conversationId)];
   writeJson(DRAFTS_KEY, all);
 }
 
