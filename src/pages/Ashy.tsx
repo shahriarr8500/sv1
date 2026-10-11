@@ -79,6 +79,13 @@ import {
   stripDataUrlPrefix,
 } from "@/components/ashy/ImageCropDialog";
 import {
+  ACCEPTED_IMAGE_MIME_TYPES,
+  IMAGE_REJECTION_COPY,
+  detectImageMimeFromBase64,
+  isAcceptedImageMime,
+  mimeTypeFromDataUrl,
+} from "@/lib/ashy-attachments";
+import {
   ASHY_FAILURE_COPY,
   ASHY_STARTERS,
   loadAshyPanelOpen,
@@ -686,8 +693,14 @@ export default function AshyPage() {
     async (overrideText?: string) => {
       if (busy) return;
       const text = (overrideText ?? draft).trim();
+      // The declared type is derived from the data URL itself (the cropper
+      // re-encodes to JPEG; older drafts may hold PNG/WebP). The backend
+      // re-derives the MIME from the bytes anyway — this is for consistency.
       const image = pendingImage
-        ? { mimeType: "image/jpeg", data: stripDataUrlPrefix(pendingImage) }
+        ? {
+            mimeType: mimeTypeFromDataUrl(pendingImage),
+            data: stripDataUrlPrefix(pendingImage),
+          }
         : null;
       if (!text && !image) {
         toast("Nothing to send yet", {
@@ -1039,6 +1052,18 @@ export default function AshyPage() {
       }
       try {
         const dataUrl = await readImageFile(file);
+        // `accept` and file.type are hints only — the picker and the OS can
+        // both be wrong. Confirm the bytes really are a supported image
+        // before the cropper opens, so a bad file is rejected here with a
+        // clear message instead of failing at send time.
+        if (
+          !isAcceptedImageMime(detectImageMimeFromBase64(stripDataUrlPrefix(dataUrl)) ?? "")
+        ) {
+          toast("Unsupported image", {
+            description: IMAGE_REJECTION_COPY.unsupportedBytes,
+          });
+          return;
+        }
         setPreviewLarge(false);
         setCropFromCamera(source === "camera");
         setCropSrc(dataUrl);
@@ -1870,7 +1895,7 @@ export default function AshyPage() {
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/png,image/jpeg,image/webp"
+            accept={ACCEPTED_IMAGE_MIME_TYPES.join(",")}
             className="hidden"
             onChange={(event) => {
               void handleFile(event.target.files?.[0]);

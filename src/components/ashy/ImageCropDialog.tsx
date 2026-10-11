@@ -38,6 +38,10 @@ import {
   ZoomOut,
 } from "lucide-react";
 import { toast } from "sonner";
+import {
+  ACCEPTED_IMAGE_MIME_TYPES,
+  MAX_IMAGE_BYTES as SHARED_MAX_IMAGE_BYTES,
+} from "@/lib/ashy-attachments";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -48,14 +52,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-export const ACCEPTED_IMAGE_TYPES = [
-  "image/png",
-  "image/jpeg",
-  "image/webp",
-] as const;
+// Attachment types and limits live in one shared, isomorphic module so the
+// picker, the composer and the Convex backend can never drift apart.
+export { ACCEPTED_IMAGE_MIME_TYPES as ACCEPTED_IMAGE_TYPES } from "@/lib/ashy-attachments";
 
 /** Raw file size cap before crop/resize (keeps requests well under the API's). */
-export const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+export const MAX_IMAGE_BYTES = SHARED_MAX_IMAGE_BYTES;
 
 /** Longest edge of the cropped output — plenty for OCR-style reading. */
 const MAX_OUTPUT_EDGE = 1600;
@@ -67,7 +69,7 @@ const MAX_ZOOM = 4;
 const HANDLE_SIZE = 16;
 
 export function isAcceptedImage(file: File): boolean {
-  return (ACCEPTED_IMAGE_TYPES as readonly string[]).includes(file.type);
+  return (ACCEPTED_IMAGE_MIME_TYPES as readonly string[]).includes(file.type);
 }
 
 /** Reads a File into a `data:` URL (used purely locally, before cropping). */

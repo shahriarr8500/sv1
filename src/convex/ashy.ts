@@ -65,23 +65,24 @@ import {
   type GroundingFailure,
   type ResourceLink,
 } from "./ashyResources";
+import {
+  MAX_IMAGE_CHARS,
+  MAX_IMAGES_TOTAL,
+  detectImageMimeFromBase64,
+  isSupportedImageMime,
+  validateImageAttachment,
+  type ImageAttachment,
+} from "../lib/ashy-attachments";
 
 /** Google's current recommendation for new projects (verified Oct 2026). */
 const DEFAULT_MODEL = "gemini-3.5-flash-lite";
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 
-/* Input limits — generous for study use, tight enough to stay safe. */
+/* Input limits — generous for study use, tight enough to stay safe.
+ * Attachment types, byte-sniffing and image caps live in one shared module
+ * (src/lib/ashy-attachments.ts) used by both the client and this action. */
 const MAX_HISTORY = 40;
 const MAX_TEXT_CHARS = 12_000;
-const MAX_IMAGES_TOTAL = 8;
-const MAX_IMAGE_CHARS = 4_000_000; // ~3 MB binary, base64 encoded
-const ALLOWED_IMAGE_TYPES = [
-  "image/png",
-  "image/jpeg",
-  "image/jpg",
-  "image/webp",
-  "image/gif",
-];
 
 /** Per-user cap on Google-Search-grounded answers per day (Asia/Dhaka day). */
 const GROUNDED_SEARCH_DAILY_LIMIT = 30;
@@ -173,10 +174,8 @@ function dayKeyNow(): string {
   }).format(new Date());
 }
 
-interface ChatImage {
-  mimeType: string;
-  data: string;
-}
+/** The shared attachment model — one shape for client and server. */
+type ChatImage = ImageAttachment;
 
 interface ChatTurn {
   role: "user" | "model";
@@ -368,14 +367,23 @@ export const chat = action({
         if (!alreadyPersisted) {
           // Photos go to storage first (a base64 photo can exceed the
           // 1 MiB document limit); only storage ids reach the message row.
+          //
+          // Pass 1 — validate every image from its own BYTES (the declared
+          // MIME type is never trusted) before anything is stored, so an
+          // invalid attachment is rejected with a clear message and no blob
+          // is ever written for it. Pass 2 stores the survivors using the
+          // MIME type proven from those bytes.
+          const validated: ChatImage[] = [];
+          for (const image of images) {
+            const check = validateImageAttachment(image);
+            if (!check.ok) return fail("invalidImage");
+            validated.push({ mimeType: check.mimeType, data: image.data });
+          }
           const storedImages: Array<{
             mimeType: string;
             storageId: Id<"_storage">;
           }> = [];
-          for (const image of images) {
-            if (image.data.length === 0 || image.data.length > MAX_IMAGE_CHARS) {
-              return fail("invalidImage");
-            }
+          for (const image of validated) {
             try {
               const blob = new Blob([Buffer.from(image.data, "base64")], {
                 type: image.mimeType,
@@ -383,7 +391,17 @@ export const chat = action({
               const storageId = await ctx.storage.store(blob);
               storedImages.push({ mimeType: image.mimeType, storageId });
             } catch {
+              // Roll back this pass's blobs so a failed send never leaks
+              // orphaned files, then fail loudly with the friendly message.
+              for (const stored of storedImages) {
+                try {
+                  await ctx.storage.delete(stored.storageId);
+                } catch {
+                  // Best-effort cleanup only.
+                }
+              }
               console.error("[ashy] persist failed kind=image-store");
+              return fail("invalidImage");
             }
           }
           try {
@@ -407,7 +425,7 @@ export const chat = action({
           currentTurn = {
             role: "user",
             text,
-            ...(images.length > 0 ? { images } : {}),
+            ...(validated.length > 0 ? { images: validated } : {}),
           };
         }
       }
@@ -475,8 +493,8 @@ export const chat = action({
           return fail("invalidImage");
         }
         // MIME type comes from the bytes themselves, never from the client.
-        const mime = detectImageMime(image.data);
-        if (!mime || !ALLOWED_IMAGE_TYPES.includes(mime)) {
+        const mime = detectImageMimeFromBase64(image.data);
+        if (!mime || !isSupportedImageMime(mime)) {
           return fail("invalidImage");
         }
         if (imagesLeft <= 0) continue; // older image — trimmed from context
@@ -1160,39 +1178,6 @@ function kindForStatus(status: number): FailureKind {
   if (status === 429) return "quota";
   if (status === 401 || status === 403) return "unavailable";
   return "unavailable";
-}
-
-/**
- * Identifies an image from the magic bytes of its base64 payload, so the
- * backend never has to trust the MIME type the client claims. Returns the
- * image's MIME type, or null when the bytes are not a recognizable image.
- */
-function detectImageMime(base64: string): string | null {
-  const head = Buffer.from(base64.slice(0, 32), "base64");
-  if (head.length < 12) return null;
-  // PNG signature: 89 50 4E 47 0D 0A 1A 0A
-  if (
-    head[0] === 0x89 &&
-    head[1] === 0x50 &&
-    head[2] === 0x4e &&
-    head[3] === 0x47
-  ) {
-    return "image/png";
-  }
-  // JPEG: FF D8 FF
-  if (head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff) {
-    return "image/jpeg";
-  }
-  // GIF87a / GIF89a
-  if (head.toString("latin1", 0, 4).startsWith("GIF8")) return "image/gif";
-  // WEBP: "RIFF" .... "WEBP"
-  if (
-    head.toString("latin1", 0, 4) === "RIFF" &&
-    head.toString("latin1", 8, 12) === "WEBP"
-  ) {
-    return "image/webp";
-  }
-  return null;
 }
 
 interface GeminiPayload {
