@@ -377,3 +377,97 @@ export const DOCUMENT_INSTRUCTION = `Documents (PDF notes and study material):
 - Bangla and English content are both supported, including mixed-language notes and handwriting. Keep each language in its own script (never transliterate one into the other) and preserve mathematics in LaTeX.
 - When asked for a summary, explanation, revision notes, flashcards or practice questions about an attached document, build them strictly from the document's content, and say plainly when the document does not cover part of the request.
 - If a question needs pages that are not attached and are not already covered earlier in this conversation, say so plainly and tell the student to open the document in the reader and use "Ask about page" or the page-range option — then offer to help with what IS in front of you. The file itself is NOT re-sent with every later message; never claim you cannot open files.`;
+
+/* -------------------------------------------------------------------------- */
+/* Interactive visual markers (Phase 3)                                        */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Structured parameters for an application-owned interactive visual.
+ * These are the ONLY visualization shapes the app will render — every field
+ * is validated here before it can reach a message row, and the client
+ * re-validates before rendering. No AI-generated code is ever executed.
+ */
+export type ExploreSpec =
+  | { type: "vectors"; ax: number; ay: number; bx: number; by: number }
+  | { type: "graph"; expression: string };
+
+/** Marker forms the model may emit (one per reply, like the video marker):
+ *  `[[explore: vectors A=(3,4) B=(-1,2)]]`
+ *  `[[explore: graph y=sin(x)+a]]`
+ */
+const EXPLORE_MARKER = /\[\[\s*explore\s*:\s*([^\]]{0,400})\]\]/i;
+const EXPLORE_MARKER_GLOBAL = /\s*\[\[\s*explore\s*:\s*[^\]]{0,400}\]\]/gi;
+const EXPLORE_NUM = "-?\\d+(?:\\.\\d+)?";
+const EXPLORE_COMPONENT_CAP = 1000;
+
+function boundedExploreNumber(raw: string): number | null {
+  const value = Number(raw);
+  if (!Number.isFinite(value)) return null;
+  if (Math.abs(value) > EXPLORE_COMPONENT_CAP) return null;
+  return value;
+}
+
+/** Parses one marker payload; null when malformed (caller strips it anyway). */
+function parseExplorePayload(payload: string): ExploreSpec | null {
+  const text = payload.trim();
+  if (/^vectors\b/i.test(text)) {
+    const match = new RegExp(
+      `a\\s*=\\s*\\(\\s*(${EXPLORE_NUM})\\s*,\\s*(${EXPLORE_NUM})\\s*\\)\\s*` +
+        `b\\s*=\\s*\\(\\s*(${EXPLORE_NUM})\\s*,\\s*(${EXPLORE_NUM})\\s*\\)`,
+      "i",
+    ).exec(text);
+    if (!match) return null;
+    const [ax, ay, bx, by] = [match[1], match[2], match[3], match[4]].map(
+      boundedExploreNumber,
+    );
+    if (ax === null || ay === null || bx === null || by === null) return null;
+    return { type: "vectors", ax, ay, bx, by };
+  }
+  if (/^graph\b/i.test(text)) {
+    let expression = text.replace(/^graph\b/i, "").trim();
+    // Tolerate the model writing the subject explicitly.
+    expression = expression.replace(/^(?:y|f\(x\))\s*=\s*/i, "").trim();
+    if (expression.length === 0 || expression.length > 160) return null;
+    // Charset whitelist — lowercase names, digits, operators and dots only.
+    if (!/^[a-z0-9+\-*/^().\s]+$/.test(expression)) return null;
+    if (!/[a-z0-9]/.test(expression)) return null;
+    return { type: "graph", expression };
+  }
+  return null;
+}
+
+/**
+ * Extracts at most ONE `[[explore: …]]` marker from a model reply. Marker
+ * lines are always stripped from the visible text; the structured spec is
+ * returned only when every parameter passed validation — a malformed marker
+ * silently degrades to a normal text answer, never to a broken widget.
+ */
+export function extractExploreMarker(text: string): {
+  clean: string;
+  explore: ExploreSpec | null;
+} {
+  let explore: ExploreSpec | null = null;
+  const match = EXPLORE_MARKER.exec(text);
+  if (match) {
+    explore = parseExplorePayload(match[1] ?? "");
+  }
+  const clean = text
+    .replace(EXPLORE_MARKER_GLOBAL, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return { clean, explore };
+}
+
+/**
+ * System instruction for offering interactive visuals. Kept here — pure and
+ * testable — so the chat action only injects it.
+ */
+export const MATH_VISUALIZATION_INSTRUCTION = `Interactive visuals (opt-in markers):
+- When a math explanation would genuinely benefit from manipulation — vector composition and resultants, or how a function's shape changes with a parameter — you MAY offer an interactive visual. Emit exactly ONE marker, on its own line, in one of these forms:
+  [[explore: vectors A=(3,4) B=(-1,2)]]
+  [[explore: graph y=a*sin(x)]]
+- Vector parameters are finite component numbers (absolute value ≤ 1000). Graph expressions use the variable x plus optional parameters a, b, c, d; allowed functions are sin, cos, tan, asin, acos, atan, sqrt, abs, exp, ln, log, floor, ceil, round, with constants pi and e.
+- The app renders the visual itself from application-owned components — the marker only carries validated numbers and a validated expression, never code.
+- The written answer must stand alone: never rely on the visual to make your point, never emit a marker for a non-math answer, and never emit more than one marker. Malformed markers are silently dropped.`;

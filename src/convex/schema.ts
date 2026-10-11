@@ -248,6 +248,23 @@ const schema = defineSchema(
           labels: v.array(v.string()),
         }),
       ),
+      /**
+       * Phase 3: at most one validated interactive-visual spec per answer.
+       * Only the shapes below may ever render — the client re-validates
+       * before drawing, and no AI-generated code is executed anywhere.
+       */
+      explore: v.optional(
+        v.union(
+          v.object({
+            type: v.literal("vectors"),
+            ax: v.number(),
+            ay: v.number(),
+            bx: v.number(),
+            by: v.number(),
+          }),
+          v.object({ type: v.literal("graph"), expression: v.string() }),
+        ),
+      ),
     })
       .index("by_conversation", ["conversationId", "seq"])
       .index("by_conversation_client", ["conversationId", "clientMessageId"])

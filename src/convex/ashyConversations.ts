@@ -263,6 +263,7 @@ export const getConversation = query({
           searchEntryPointUrl: row.searchEntryPointUrl,
           chips: row.chips,
           planMissions: row.planMissions,
+          explore: row.explore,
         };
       }),
     );
@@ -681,6 +682,19 @@ export const appendReply = mutation({
         labels: v.array(v.string()),
       }),
     ),
+    /** Phase 3: one validated interactive-visual spec (client re-validates). */
+    explore: v.optional(
+      v.union(
+        v.object({
+          type: v.literal("vectors"),
+          ax: v.number(),
+          ay: v.number(),
+          bx: v.number(),
+          by: v.number(),
+        }),
+        v.object({ type: v.literal("graph"), expression: v.string() }),
+      ),
+    ),
   },
   handler: async (ctx, args) => {
     const userId = await requireWritableUser(ctx);
@@ -716,6 +730,7 @@ export const appendReply = mutation({
       searchEntryPointUrl: args.searchEntryPointUrl,
       chips: args.chips,
       planMissions: args.planMissions,
+      explore: args.explore,
     });
     await ctx.db.patch(conversation._id, {
       lastSeq: seq,

@@ -62,6 +62,7 @@ import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { cn } from "@/lib/utils";
 import { MessageContent } from "@/components/ashy/MessageContent";
+import { ExplorePanel } from "@/components/ashy/ExplorePanel";
 import { CameraCaptureDialog } from "@/components/ashy/CameraCaptureDialog";
 import {
   AshyVideoCard,
@@ -777,6 +778,7 @@ export default function AshyPage() {
           searchEntryPointUrl: result.searchEntryPointUrl,
           chips: result.chips,
           planMissions: result.planMissions,
+          explore: result.explore,
         };
         addPending(params.conversationId, assistantMessage);
         // Persist the answer (idempotent). If this write fails the local
@@ -795,6 +797,7 @@ export default function AshyPage() {
           searchEntryPointUrl: assistantMessage.searchEntryPointUrl,
           chips: assistantMessage.chips,
           planMissions: assistantMessage.planMissions,
+          explore: assistantMessage.explore,
         }).catch(() => {
           // Local copy already shown — nothing else to do.
         });
@@ -1898,6 +1901,12 @@ export default function AshyPage() {
                               >
                                 <MessageContent text={message.text} />
                               </div>
+                            ) : null}
+
+                            {/* Phase 3 (math): app-owned interactive visual,
+                                rendered only from a validated spec. */}
+                            {message.role === "assistant" && message.explore ? (
+                              <ExplorePanel explore={message.explore} />
                             ) : null}
 
                             {/* Search notice: shown once per conversation. */}

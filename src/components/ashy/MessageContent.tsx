@@ -137,7 +137,25 @@ export function MessageContent({ text }: { text: string }) {
     <div className="text-sm break-words [&_.katex-display]:my-2 [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden [&_.katex]:text-[1.05em]">
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex]}
+        rehypePlugins={[
+          [
+            rehypeKatex,
+            {
+              // Untrusted-input safety (Phase 3): invalid math renders as
+              // its own source in the error colour instead of throwing, so
+              // ordinary text next to a broken formula stays readable.
+              // Macro expansion and font size are capped (no \def-based DoS),
+              // and commands that require `trust` (\href, \includegraphics)
+              // are refused outright.
+              throwOnError: false,
+              errorColor: "var(--destructive, #b91c1c)",
+              strict: false,
+              trust: false,
+              maxExpand: 1000,
+              maxSize: 60,
+            },
+          ],
+        ]}
         components={components}
       >
         {text}

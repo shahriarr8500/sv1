@@ -473,7 +473,12 @@ export function documentAttachmentMarker(name: string): string {
 export function pagesAttachmentMarker(label: string): string {
   // The viewer builds labels like "Page 3 of notes.pdf" /
   // "Pages 2–4 of notes.pdf" — bounded and already sanitized upstream.
-  const clean = label.replace(/[\u0000-\u001f]/g, "").trim().slice(0, 160);
+  let clean = "";
+  for (const char of label) {
+    // Strip control characters without a control-char regex.
+    if (char.charCodeAt(0) >= 32) clean += char;
+  }
+  clean = clean.trim().slice(0, 160);
   return `[Attached: ${clean || "selected pages"}]`;
 }
 

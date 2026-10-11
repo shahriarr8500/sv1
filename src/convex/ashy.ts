@@ -38,9 +38,12 @@ import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { action } from "./_generated/server";
 import {
+  MATH_VISUALIZATION_INSTRUCTION,
   buildProgressSummary,
+  extractExploreMarker,
   extractVideoQueries,
   formatIsoDuration,
+  type ExploreSpec,
   type GroundedSource,
   parseGroundingMetadata,
   VIDEO_ID_PATTERN,
@@ -167,6 +170,8 @@ type Result =
       chips?: string[];
       /** Real syllabus item ids of week 1 — powers "Add to Missions". */
       planMissions?: { itemIds: string[]; labels: string[] };
+      /** Phase 3 (math): one validated interactive-visual spec. */
+      explore?: ExploreSpec;
     }
   | { ok: false; kind: FailureKind; message: string };
 
@@ -959,6 +964,8 @@ export const chat = action({
     if (hasDocument || mentionsAttachment) {
       systemParts.push(DOCUMENT_INSTRUCTION);
     }
+    // Interactive-visual markers (opt-in; malformed markers are dropped).
+    systemParts.push(MATH_VISUALIZATION_INSTRUCTION);
     if (transcribing) {
       // Handwritten-note mode: the transcription rules replace normal
       // answering behaviour for this single request only.
@@ -1285,6 +1292,18 @@ export const chat = action({
       ok: true,
       text: clean || rawText,
     };
+    // Phase 3 (math): [[explore: …]] markers — structured, validated
+    // parameters only. Stripped from the visible text either way; attached
+    // to the result only when they passed validation (and never on plan or
+    // transcription replies).
+    const explored = extractExploreMarker(result.text);
+    // Always the stripped text — never fall back to a copy that still
+    // contains the marker (a marker-only reply yields an empty string,
+    // which is preferable to showing raw marker syntax to a student).
+    result.text = explored.clean;
+    if (explored.explore && !transcribing && !planningReply) {
+      result.explore = explored.explore;
+    }
     if (result.ok) {
       if (videos.length > 0) result.videos = videos.slice(0, MAX_VIDEOS);
       if (videoSearch) result.videoSearch = videoSearch;

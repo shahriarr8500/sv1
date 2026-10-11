@@ -69,7 +69,18 @@ export interface AshyMessage {
   planMissions?: { itemIds: string[]; labels: string[] };
   /** Which limit produced the notice: the app's per-user cap or Gemini's 429. */
   searchNoticeKind?: "userLimit" | "providerQuota" | "other";
+  /** Phase 3 (math): one validated interactive-visual spec for this answer. */
+  explore?: AshyExplore;
 }
+
+/**
+ * One interactive-visual spec. Only these two shapes exist — the client
+ * re-validates every field before rendering (see ExplorePanel), so a stored
+ * row can never smuggle anything else past validation.
+ */
+export type AshyExplore =
+  | { type: "vectors"; ax: number; ay: number; bx: number; by: number }
+  | { type: "graph"; expression: string };
 
 /** One real, backend-searched YouTube video. */
 export interface AshyVideo {

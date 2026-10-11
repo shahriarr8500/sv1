@@ -509,7 +509,8 @@ assert(
   "back-compat: Ashy still never claims it cannot open files",
 );
 assert(
-  DOCUMENT_INSTRUCTION !== TRANSCRIPTION_INSTRUCTION,
+  /Documents \(PDF notes/.test(DOCUMENT_INSTRUCTION) &&
+    !/transcription mode is ON/.test(DOCUMENT_INSTRUCTION),
   "document-answering and transcription modes remain separate instructions",
 );
 
