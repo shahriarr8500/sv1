@@ -219,7 +219,7 @@ export default function AshyPage() {
   });
   const [chatNotFound, setChatNotFound] = useState(false);
   /** Project that a NEW chat will be created inside (chip above composer). */
-  const [openProjectId, setOpenProjectId] = useState<string | null>(null);
+  const [openProjectId, setOpenProjectId] = useState<ProjId | null>(null);
 
   /* --- composer --------------------------------------------------------- */
   const [draft, setDraft] = useState(
@@ -239,7 +239,7 @@ export default function AshyPage() {
 
   /* --- request state ---------------------------------------------------- */
   const [busy, setBusy] = useState(false);
-  const [busyConvId, setBusyConvId] = useState<string | null>(null);
+  const [busyConvId, setBusyConvId] = useState<ConvId | null>(null);
   /** True while the student is scrolled up (shows "Jump to latest"). */
   const [showJump, setShowJump] = useState(false);
   const [searchMode, setSearchMode] = useState<"auto" | "on" | "off">("auto");
@@ -261,7 +261,7 @@ export default function AshyPage() {
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameValue, setRenameValue] = useState("");
   const [newProjectDialog, setNewProjectDialog] = useState<{
-    moveChatId?: string;
+    moveChatId?: ConvId;
   } | null>(null);
   const [newProjectForm, setNewProjectForm] = useState({
     name: "",
@@ -1011,8 +1011,8 @@ export default function AshyPage() {
   );
 
   const deleteProject = useCallback(
-    (projectId: string, mode: "move" | "delete") => {
-      void deleteProjectMut({ projectId: asProjId(projectId), mode })
+    (projectId: ProjId, mode: "move" | "delete") => {
+      void deleteProjectMut({ projectId, mode })
         .then(({ affected }) => {
           if (openProjectId === projectId) setOpenProjectId(null);
           toast(
@@ -2050,9 +2050,9 @@ export default function AshyPage() {
       {/* New project (from the header menu, optionally moving the chat) */}
       <Dialog
         open={newProjectDialog !== null}
-        onOpenChange={(open) => {
+        onOpenChange={    (open) => {
           if (!open) setNewProjectDialog(null);
-        }}
+        }
       >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
