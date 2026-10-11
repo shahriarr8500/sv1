@@ -180,11 +180,31 @@ const schema = defineSchema(
           v.literal("unavailable"),
           v.literal("blocked"),
           v.literal("invalidImage"),
+          /** Phase 2: unreadable/corrupt PDF, or a file that isn't a PDF. */
+          v.literal("invalidPdf"),
+          /** Phase 2: password-protected PDF. */
+          v.literal("encryptedPdf"),
+          /** Phase 2: PDF over the whole-document page budget. */
+          v.literal("pdfTooManyPages"),
         ),
       ),
       images: v.optional(
         v.array(
           v.object({ mimeType: v.string(), storageId: v.id("_storage") }),
+        ),
+      ),
+      /**
+       * Phase 2: PDF documents, same storage pattern as images — the row
+       * keeps only safe metadata (name, size) plus the storage id; base64
+       * bytes are never persisted in a document.
+       */
+      pdfs: v.optional(
+        v.array(
+          v.object({
+            name: v.string(),
+            size: v.number(),
+            storageId: v.id("_storage"),
+          }),
         ),
       ),
       videos: v.optional(

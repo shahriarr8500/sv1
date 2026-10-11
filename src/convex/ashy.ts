@@ -68,11 +68,20 @@ import {
 import {
   MAX_IMAGE_CHARS,
   MAX_IMAGES_TOTAL,
+  MAX_PDF_BYTES,
+  MAX_PDF_CHARS,
+  MAX_PDF_PAGES,
+  MAX_PDFS_PER_MESSAGE,
+  PDF_MIME_TYPE,
   detectImageMimeFromBase64,
   isSupportedImageMime,
+  sanitizePdfName,
   validateImageAttachment,
+  validatePdfAttachment,
   type ImageAttachment,
+  type PdfAttachment,
 } from "../lib/ashy-attachments";
+import { TRANSCRIPTION_INSTRUCTION } from "./ashyShared";
 
 /** Google's current recommendation for new projects (verified Oct 2026). */
 const DEFAULT_MODEL = "gemini-3.5-flash-lite";
@@ -103,6 +112,9 @@ type FailureKind =
   | "unavailable"
   | "blocked"
   | "invalidImage"
+  | "invalidPdf"
+  | "encryptedPdf"
+  | "pdfTooManyPages"
   | "readOnly";
 
 const FAILURE_MESSAGES: Record<FailureKind, string> = {
@@ -113,6 +125,12 @@ const FAILURE_MESSAGES: Record<FailureKind, string> = {
     "Ashy couldn't answer that. Try rephrasing your question a little.",
   invalidImage:
     "That image couldn't be read. Please attach it again as a PNG, JPEG or WebP and retry.",
+  invalidPdf:
+    "That PDF couldn't be read — it may be corrupt or not really a PDF. Please re-export it and try again.",
+  encryptedPdf:
+    "That PDF is password-protected. Remove the password (re-export it without one) and upload it again.",
+  pdfTooManyPages:
+    "That PDF has more than 80 pages, so it can't be sent whole. Open it and ask about a page range instead — Ashy reads selected pages at a time.",
   readOnly:
     "Viewing another student's account — Ashy is read-only right now.",
 };
@@ -177,10 +195,17 @@ function dayKeyNow(): string {
 /** The shared attachment model — one shape for client and server. */
 type ChatImage = ImageAttachment;
 
+/** One PDF in the outgoing Gemini payload (fresh upload or re-hydrated). */
+interface ChatPdf {
+  name: string;
+  data: string;
+}
+
 interface ChatTurn {
   role: "user" | "model";
   text: string;
   images?: ChatImage[];
+  pdfs?: ChatPdf[];
 }
 
 const turnValidator = v.object({
@@ -272,6 +297,12 @@ const imageInputValidator = v.object({
   data: v.string(),
 });
 
+const pdfInputValidator = v.object({
+  name: v.string(),
+  size: v.number(),
+  data: v.string(),
+});
+
 /** How many stored turns are sent to Gemini — the same cap the client used. */
 const MAX_CONTEXT_TURNS = 30;
 
@@ -285,6 +316,12 @@ export const chat = action({
     clientMessageId: v.optional(v.string()),
     text: v.optional(v.string()),
     images: v.optional(v.array(imageInputValidator)),
+    /** Phase 2: PDF documents (validated from their bytes before storing). */
+    pdfs: v.optional(v.array(pdfInputValidator)),
+    /** "ask" (default) answers normally; "transcribe" transcribes notes. */
+    requestKind: v.optional(
+      v.union(v.literal("ask"), v.literal("transcribe")),
+    ),
     /** "send" persists the message; "regenerate" only re-answers. */
     mode: v.optional(v.union(v.literal("send"), v.literal("regenerate"))),
     /** Student's local answer-length preference (advisory, never overrides). */
@@ -310,6 +347,8 @@ export const chat = action({
       clientMessageId?: string;
       text?: string;
       images?: ChatImage[];
+      pdfs?: PdfAttachment[];
+      requestKind?: "ask" | "transcribe";
       mode?: "send" | "regenerate";
       answerLength?: "concise" | "balanced" | "detailed";
       context?: string;
@@ -359,28 +398,54 @@ export const chat = action({
       if (args.mode !== "regenerate") {
         const text = args.text ?? "";
         const images = args.images ?? [];
-        if (!text.trim() && images.length === 0) return fail("unavailable");
+        const pdfs = args.pdfs ?? [];
+        if (!text.trim() && images.length === 0 && pdfs.length === 0) {
+          return fail("unavailable");
+        }
         if (!args.clientMessageId) return fail("unavailable");
         const alreadyPersisted = chatCtx.rows.some(
           (row) => row.clientMessageId === args.clientMessageId,
         );
         if (!alreadyPersisted) {
-          // Photos go to storage first (a base64 photo can exceed the
-          // 1 MiB document limit); only storage ids reach the message row.
+          // Photos and PDFs go to storage first (base64 payloads can exceed
+          // the 1 MiB document limit); only storage ids reach the row.
           //
-          // Pass 1 — validate every image from its own BYTES (the declared
-          // MIME type is never trusted) before anything is stored, so an
-          // invalid attachment is rejected with a clear message and no blob
-          // is ever written for it. Pass 2 stores the survivors using the
-          // MIME type proven from those bytes.
+          // Pass 1 — validate every attachment from its own BYTES (the
+          // declared MIME type is never trusted) before anything is stored,
+          // so an invalid attachment is rejected with a clear message and no
+          // blob is ever written for it. Pass 2 stores the survivors using
+          // the types proven from those bytes.
           const validated: ChatImage[] = [];
           for (const image of images) {
             const check = validateImageAttachment(image);
             if (!check.ok) return fail("invalidImage");
             validated.push({ mimeType: check.mimeType, data: image.data });
           }
+          const validatedPdfs: PdfAttachment[] = [];
+          if (pdfs.length > MAX_PDFS_PER_MESSAGE) return fail("invalidPdf");
+          for (const pdf of pdfs) {
+            const check = validatePdfAttachment(pdf);
+            if (!check.ok) {
+              if (check.reason === "encrypted") return fail("encryptedPdf");
+              if (check.reason === "tooManyPages") {
+                return fail("pdfTooManyPages");
+              }
+              return fail("invalidPdf");
+            }
+            // Re-validated: strip any path from the display name.
+            validatedPdfs.push({
+              name: sanitizePdfName(pdf.name),
+              size: pdf.size,
+              data: pdf.data,
+            });
+          }
           const storedImages: Array<{
             mimeType: string;
+            storageId: Id<"_storage">;
+          }> = [];
+          const storedPdfs: Array<{
+            name: string;
+            size: number;
             storageId: Id<"_storage">;
           }> = [];
           for (const image of validated) {
@@ -404,6 +469,33 @@ export const chat = action({
               return fail("invalidImage");
             }
           }
+          for (const pdf of validatedPdfs) {
+            try {
+              const blob = new Blob([Buffer.from(pdf.data, "base64")], {
+                type: PDF_MIME_TYPE,
+              });
+              const storageId = await ctx.storage.store(blob);
+              storedPdfs.push({ name: pdf.name, size: pdf.size, storageId });
+            } catch {
+              for (const stored of storedImages) {
+                try {
+                  await ctx.storage.delete(stored.storageId);
+                } catch {
+                  // Best-effort cleanup only.
+                }
+              }
+              for (const stored of storedPdfs) {
+                try {
+                  await ctx.storage.delete(stored.storageId);
+                } catch {
+                  // Best-effort cleanup only.
+                }
+              }
+              // Log kind + type only — never the filename or contents.
+              console.error("[ashy] persist failed kind=pdf-store");
+              return fail("invalidPdf");
+            }
+          }
           try {
             const saved = await ctx.runMutation(
               internal.ashyConversations.persistUserMessage,
@@ -413,6 +505,7 @@ export const chat = action({
                 clientMessageId: args.clientMessageId,
                 text,
                 images: storedImages.length > 0 ? storedImages : undefined,
+                pdfs: storedPdfs.length > 0 ? storedPdfs : undefined,
               },
             );
             if (!saved.ok) return fail("unauthorized");
@@ -426,6 +519,9 @@ export const chat = action({
             role: "user",
             text,
             ...(validated.length > 0 ? { images: validated } : {}),
+            ...(validatedPdfs.length > 0
+              ? { pdfs: validatedPdfs.map(({ name, data }) => ({ name, data })) }
+              : {}),
           };
         }
       }
@@ -436,10 +532,19 @@ export const chat = action({
       const usableRows = chatCtx.rows.filter(
         (row) =>
           !row.failed &&
-          (row.text.trim() !== "" || row.images.length > 0),
+          (row.text.trim() !== "" || row.images.length > 0 || row.pdfs.length > 0),
       );
       const room = MAX_CONTEXT_TURNS - (currentTurn ? 1 : 0);
       const window = usableRows.slice(-room);
+      // Regenerate re-answers the newest stored question: its document
+      // belongs to that question, so it is re-hydrated once. Every other
+      // history turn references its PDF by name only — the bytes are never
+      // blindly re-sent with each follow-up (cost, latency, token budget).
+      const lastUserRowId =
+        [...chatCtx.rows]
+          .reverse()
+          .find((row) => row.role === "user" && !row.failed)?.clientMessageId ??
+        "";
       for (const row of window) {
         const turn: ChatTurn = {
           role: row.role === "user" ? "user" : "model",
@@ -460,6 +565,39 @@ export const chat = action({
           }
         }
         if (hydrated.length > 0) turn.images = hydrated;
+
+        // Phase 2: PDFs in history → a marker line, not bytes (see above).
+        const rowPdfs = row.pdfs;
+        if (rowPdfs.length > 0) {
+          const names = rowPdfs.map((pdf) => pdf.name).join(", ");
+          const regenTarget =
+            args.mode === "regenerate" &&
+            row.role === "user" &&
+            row.clientMessageId === lastUserRowId;
+          if (regenTarget) {
+            const hydratedPdfs: ChatPdf[] = [];
+            for (const pdf of rowPdfs) {
+              if (pdf.size > MAX_PDF_BYTES) continue; // too big to re-read
+              try {
+                const blob = await ctx.storage.get(pdf.storageId);
+                if (!blob) continue;
+                const bytes = Buffer.from(await blob.arrayBuffer());
+                hydratedPdfs.push({
+                  name: pdf.name,
+                  data: bytes.toString("base64"),
+                });
+              } catch {
+                // A lost blob falls back to the marker line below.
+              }
+            }
+            if (hydratedPdfs.length > 0) turn.pdfs = hydratedPdfs;
+            else {
+              turn.text += `\n[Attached document: ${names} — it could not be re-read; ask the student to upload it again.]`;
+            }
+          } else {
+            turn.text += `\n[Attached document: ${names} — the file itself is NOT re-sent with this message. If the student asks a new question that needs the file's contents and they are not already covered in this conversation, tell them to tap "Ask about document" on the message where they uploaded it.]`;
+          }
+        }
         history.push(turn);
       }
       if (currentTurn) history.push(currentTurn);
@@ -473,6 +611,9 @@ export const chat = action({
     }
 
     let imagesLeft = MAX_IMAGES_TOTAL;
+    // Whole-document budget per request: never stack more than one PDF's
+    // bytes into a single Gemini call (conservative cost/latency ceiling).
+    let docsLeft = MAX_PDFS_PER_MESSAGE;
     // Walk newest → oldest so the image the student just attached can never be
     // the one that gets dropped: the multimodal budget is spent on recent
     // turns first, and only older images are trimmed from context when it runs
@@ -504,6 +645,18 @@ export const chat = action({
         });
       }
 
+      // Phase 2: whole-document bytes (fresh uploads + regenerate targets).
+      for (const pdf of turn.pdfs ?? []) {
+        if (pdf.data.length === 0 || pdf.data.length > MAX_PDF_CHARS) {
+          return fail("invalidPdf");
+        }
+        if (docsLeft <= 0) continue; // one document per request — budget
+        docsLeft -= 1;
+        parts.push({
+          inline_data: { mime_type: PDF_MIME_TYPE, data: pdf.data },
+        });
+      }
+
       // A turn left with nothing (an image-only turn past the budget) is
       // dropped from the payload rather than failing the whole conversation.
       if (parts.length > 0) contents[i] = { role: turn.role, parts };
@@ -514,9 +667,20 @@ export const chat = action({
     );
     if (cleanContents.length === 0) return fail("unavailable");
 
+    const partIsDocument = (part: Record<string, unknown>): boolean => {
+      const inline = part.inline_data as { mime_type?: string } | undefined;
+      return inline?.mime_type === PDF_MIME_TYPE;
+    };
     const hasImage = cleanContents.some((turn) =>
-      turn.parts.some((part) => "inline_data" in part),
+      turn.parts.some(
+        (part) => "inline_data" in part && !partIsDocument(part),
+      ),
     );
+    const hasDocument = cleanContents.some((turn) =>
+      turn.parts.some((part) => partIsDocument(part)),
+    );
+    const requestKind = args.requestKind ?? "ask";
+    const transcribing = requestKind === "transcribe";
     const searchMode =
       args.searchMode === "on" || args.searchMode === "off"
         ? args.searchMode
@@ -708,11 +872,13 @@ export const chat = action({
     }
 
     // --- Phase 6: resource/link asks must always end in clickable links ---
-    const resourceAsk = shouldRunResourceFallback(latestUserText, {
-      planningReply,
-      progressAsk,
-      hasImage,
-    });
+    const resourceAsk =
+      !transcribing &&
+      shouldRunResourceFallback(latestUserText, {
+        planningReply,
+        progressAsk,
+        hasImage: hasImage || hasDocument,
+      });
     // When search is not running for this message at all, skip the plain
     // first Gemini call: the fallback chain below builds the answer WITH its
     // links in a single round trip instead of two.
@@ -720,6 +886,11 @@ export const chat = action({
 
     // --- Assemble the request --------------------------------------------
     const systemParts = [SYSTEM_PROMPT];
+    if (transcribing) {
+      // Handwritten-note mode: the transcription rules replace normal
+      // answering behaviour for this single request only.
+      systemParts.push(TRANSCRIPTION_INSTRUCTION);
+    }
     if (progressSummary) systemParts.push(progressSummary);
     if (planContext) {
       systemParts.push(

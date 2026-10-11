@@ -143,6 +143,13 @@ async function deleteMessagesCascade(
           // Best-effort blob cleanup — never blocks the delete itself.
         }
       }
+      for (const pdf of row.pdfs ?? []) {
+        try {
+          await ctx.storage.delete(pdf.storageId);
+        } catch {
+          // Best-effort blob cleanup — never blocks the delete itself.
+        }
+      }
       await ctx.db.delete(row._id);
     }
     rows = await ctx.db
@@ -225,12 +232,27 @@ export const getConversation = query({
           (image): image is { mimeType: string; url: string } =>
             image.url !== null,
         );
+        // Phase 2: PDFs render the same way — an authorization-gated signed
+        // URL (never a public bucket link), plus safe display metadata.
+        const pdfs = await Promise.all(
+          (row.pdfs ?? []).map(async (pdf) => ({
+            name: pdf.name,
+            size: pdf.size,
+            storageId: pdf.storageId as string,
+            url: await ctx.storage.getUrl(pdf.storageId),
+          })),
+        );
+        const withPdfs = pdfs.filter(
+          (pdf): pdf is { name: string; size: number; storageId: string; url: string } =>
+            pdf.url !== null,
+        );
         return {
           id: row.clientMessageId,
           role: row.role,
           text: row.text,
           error: row.errorKind,
           images: withImages.length > 0 ? withImages : undefined,
+          pdfs: withPdfs.length > 0 ? withPdfs : undefined,
           videos: row.videos,
           videoSearch: row.videoSearch,
           sources: row.sources,
@@ -565,6 +587,13 @@ export const editUserMessage = mutation({
           // Best-effort blob cleanup.
         }
       }
+      for (const pdf of doc.pdfs ?? []) {
+        try {
+          await ctx.storage.delete(pdf.storageId);
+        } catch {
+          // Best-effort blob cleanup.
+        }
+      }
       await ctx.db.delete(doc._id);
       removed += 1;
     }
@@ -719,6 +748,16 @@ export const persistUserMessage = internalMutation({
         v.object({ mimeType: v.string(), storageId: v.id("_storage") }),
       ),
     ),
+    /** Phase 2: PDFs already uploaded to storage by the chat action. */
+    pdfs: v.optional(
+      v.array(
+        v.object({
+          name: v.string(),
+          size: v.number(),
+          storageId: v.id("_storage"),
+        }),
+      ),
+    ),
   },
   handler: async (ctx, args) => {
     const conversation = await ctx.db.get(args.conversationId);
@@ -735,10 +774,12 @@ export const persistUserMessage = internalMutation({
       .unique();
     if (existing) return { ok: true as const, duplicate: true };
 
-    // Photos live in Convex storage (uploaded by the chat action) — a
-    // base64 photo can exceed the 1 MiB document limit.
+    // Photos and PDFs live in Convex storage (uploaded by the chat action) —
+    // base64 payloads can exceed the 1 MiB document limit, so rows keep only
+    // safe metadata plus the storage id.
     const images =
       args.images && args.images.length > 0 ? args.images : undefined;
+    const pdfs = args.pdfs && args.pdfs.length > 0 ? args.pdfs : undefined;
 
     const now = Date.now();
     const seq = (conversation.lastSeq ?? 0) + 1;
@@ -752,6 +793,7 @@ export const persistUserMessage = internalMutation({
       seq,
       createdAt: now,
       images,
+      pdfs,
     });
 
     // Auto-title from the first message — never after a student rename.
@@ -805,6 +847,11 @@ export const loadChatForReply = internalQuery({
         images: (row.images ?? []).map((image) => ({
           mimeType: image.mimeType,
           storageId: image.storageId,
+        })),
+        pdfs: (row.pdfs ?? []).map((pdf) => ({
+          name: pdf.name,
+          size: pdf.size,
+          storageId: pdf.storageId,
         })),
       })),
     };

@@ -110,7 +110,12 @@ assert(
 /* 3. Supported / accepted sets — exactly PNG, JPEG, WebP for uploads          */
 /* -------------------------------------------------------------------------- */
 
-assert(ATTACHMENT_KINDS.length === 1 && ATTACHMENT_KINDS[0] === "image", "only the image kind exists in Phase 1");
+assert(
+  ATTACHMENT_KINDS.length === 2 &&
+    ATTACHMENT_KINDS[0] === "image" &&
+    ATTACHMENT_KINDS[1] === "pdf",
+  "attachment kinds are exactly [image, pdf] (Phase 2)",
+);
 assert(ACCEPTED_IMAGE_MIME_TYPES.length === 3, "exactly three accepted upload types");
 assert(isAcceptedImageMime("image/png"), "accepts PNG");
 assert(isAcceptedImageMime("image/jpeg"), "accepts JPEG");

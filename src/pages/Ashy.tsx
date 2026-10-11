@@ -356,6 +356,9 @@ export default function AshyPage() {
     const base: AshyMessage[] = (serverMessages ?? []).map((message) => ({
       ...message,
       role: message.role,
+      // Failure kinds arrive typed from the Convex schema; they match the
+      // client's AshyFailureKind union exactly (see src/lib/ashy.ts).
+      error: message.error as AshyMessage["error"],
     }));
     const localList = activeId ? (pending[activeId] ?? []) : [];
     if (localList.length === 0) return base;
@@ -682,7 +685,7 @@ export default function AshyPage() {
           id: newId(),
           role: "assistant",
           text: "",
-          error: result.kind,
+          error: result.kind as AshyMessage["error"],
         });
       }
     },

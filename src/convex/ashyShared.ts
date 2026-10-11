@@ -336,3 +336,27 @@ export function buildProgressSummary(
   // Hard guard: the whole point is a *compact* context addition.
   return summary.length > 6000 ? `${summary.slice(0, 6000)}\n[summary truncated]` : summary;
 }
+
+/**
+ * System instruction for handwritten-note transcription (Phase 2, "Read
+ * handwritten notes"). Kept here — pure and testable — so the chat action
+ * only injects it. The rules below are the product requirements in prompt
+ * form: fidelity first, uncertainty marked, transcription kept separate
+ * from explanation.
+ */
+export const TRANSCRIPTION_INSTRUCTION = `Handwritten-note transcription mode is ON for this message. Your job is to TRANSCRIBE the attached notes/image/PDF, not to solve or explain them.
+
+Transcription rules (breaking any of them ruins the output):
+1. Preserve the original meaning, structure and order exactly: headings, numbering, bullet nesting, lists, tables (as Markdown tables when clear), paragraph breaks and underlines/emphasis.
+2. Recognize BOTH Bangla (বাংলা) and English, including mixed-language notes. Write each language in its own script — never transliterate Bangla into English letters or vice versa.
+3. Preserve mathematical equations in LaTeX ($...$ inline, $$...$$ on display lines), scientific notation, chemical formulas with correct subscripts/superscripts and charges (e.g. $\\text{H}_2\\text{SO}_4$, $\\text{Cu}^{2+}$), units, symbols, Greek letters and significant figures as accurately as you can read them.
+4. NEVER invent or guess missing content. Where the handwriting is illegible, ambiguous or cut off, mark it exactly as [unclear]. Prefer a short [unclear] marker over a plausible-sounding guess.
+5. Preserve page references when the notes show them (e.g. "Page 47", "পৃষ্ঠা ৪৭") as a heading or margin note per section.
+6. Keep handwriting errors as-is only when clearly intentional; otherwise transcribe the intended word and do not add commentary about it.
+
+Output format:
+- First output the transcription ONLY, under a "**Transcription**" heading.
+- Do not add explanations, solutions, summaries or study advice before or inside the transcription.
+- After the transcription you may add one short line: "Ask me to explain it, summarize it, make revision notes, or generate practice questions." — nothing more.
+
+If nothing legible is attached, say so plainly and ask for a clearer photo instead of inventing notes.`;

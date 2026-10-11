@@ -1,5 +1,0 @@
-grep -n "return fail(\"unavailable\")" src/convex/ashy.ts | head -5
-echo "=== context ==="
-awk 'NR>=320 && NR<=340' src/convex/ashy.ts
-echo "=== ashyConversations internal usage ==="
-grep -n "internal.impersonation.getEffectiveUser\|ctx.runQuery(internal.impersonation" src/convex/ashyConversations.ts
