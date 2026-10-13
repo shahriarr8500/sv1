@@ -126,15 +126,17 @@ export function mainGroup(symbol: string): number | null {
   const z = info.z;
   if (z === 1) return 1; // H
   if (z === 2) return 18; // He
-  // Periods 2–3 (Li…Ar): 8 elements each — 1, 2, then 13…18.
+  // Periods 2–3 (Li…Ar): two octets — 1, 2, then 13…18.
   if (z >= 3 && z <= 18) {
-    const offset = z - 3; // 0…15
-    return offset < 2 ? offset + 1 : offset - 2 + 13;
+    const inOctet = (z - 3) % 8; // 0…7 within each octet
+    return inOctet < 2 ? inOctet + 1 : inOctet - 2 + 13;
   }
-  // Period 4 main group (K…Kr): 18 elements — 1, 2, then 13…18.
+  // Period 4: K, Ca are groups 1, 2; Ga…Kr are 13…18; Sc…Zn are
+  // transition metals with no single main group.
   if (z >= 19 && z <= 36) {
-    const offset = z - 19; // 0…17
-    return offset < 2 ? offset + 1 : offset - 2 + 13;
+    if (z <= 20) return z - 18; // K=1, Ca=2
+    if (z >= 31) return z - 31 + 13; // Ga=13 … Kr=18
+    return null; // Sc…Zn
   }
   // Noble gases of the later periods (Kr=36 already covered above).
   if (z === 54 || z === 86 || z === 118) return 18;

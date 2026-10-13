@@ -100,6 +100,7 @@ export function parseFormula(input: string): ParseResult {
       } else if (ch === ")" || ch === "]" || ch === "}") {
         if (stack.length === 1) throw new Error("Unmatched closing bracket.");
         const frame = stack.pop()!;
+        i += 1; // step past the bracket BEFORE reading the group multiplier
         const mult = readCount();
         for (const [symbol, count] of Object.entries(frame.counts)) {
           add(symbol, count * mult);
@@ -120,6 +121,7 @@ export function parseFormula(input: string): ParseResult {
           } else if (c === ")" || c === "]" || c === "}") {
             if (stack.length === startDepth) throw new Error("Unmatched bracket after hydrate separator.");
             const frame = stack.pop()!;
+            i += 1; // step past the bracket BEFORE reading the group multiplier
             const m = readCount();
             for (const [symbol, count] of Object.entries(frame.counts)) {
               const top = stack[stack.length - 1];
@@ -169,9 +171,12 @@ export function parseFormula(input: string): ParseResult {
     return fail(error instanceof Error ? error.message : "Invalid formula.");
   }
 
-  // Merge any frames still open (shouldn't happen) and finish.
-  const total: Record<string, number> = {};
-  for (const [symbol, count] of Object.entries(atoms)) total[symbol] = count;
+  // Merge the two places counts live: `atoms` collects bracket/hydrate
+  // groups via add(), while the bottom stack frame holds top-level atoms.
+  const total: Record<string, number> = { ...atoms };
+  for (const [symbol, count] of Object.entries(stack[0].counts)) {
+    total[symbol] = (total[symbol] ?? 0) + count;
+  }
   if (Object.keys(total).length === 0) return fail("No atoms found in the formula.");
   return { ok: true, value: { atoms: total, charge } };
 }
@@ -335,13 +340,14 @@ export function solveDilution(input: DilutionInput): DilutionResult {
   }
   const missing = known.find(([, v]) => v === undefined);
   if (!missing) return { ok: false, error: "Nothing to solve." };
+  // Validate only the GIVEN values — the missing one is solved below.
+  if (present.some(([, v]) => v === undefined || !Number.isFinite(v) || v <= 0)) {
+    return { ok: false, error: "Concentrations and volumes must all be positive numbers." };
+  }
   const c1 = input.c1 ?? 0;
   const v1 = input.v1 ?? 0;
   const c2 = input.c2 ?? 0;
   const v2 = input.v2 ?? 0;
-  if ([c1, v1, c2, v2].some((v) => !Number.isFinite(v) || v <= 0)) {
-    return { ok: false, error: "Concentrations and volumes must all be positive numbers." };
-  }
   const solved = missing[0];
   let value: number;
   if (solved === "v2") value = (c1 * v1) / c2;
