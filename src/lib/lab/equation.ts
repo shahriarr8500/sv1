@@ -70,7 +70,12 @@ function splitOnPlus(text: string): string[] | null {
         const trimmedAfter = after.trimStart();
         if (trimmedAfter.length > 0) {
           const rest = splitOnPlus(trimmedAfter);
-          if (rest) return [...tokens, before, ...rest];
+          // Only accept this split when the remainder tokenises cleanly. A
+          // leading stray "+" means THIS "+" was the species' charge, not a
+          // separator — e.g. "Mn2+ + Cl2 …" or "H+ + OH-".
+          if (rest && rest.length > 0 && !rest[0].trimStart().startsWith("+")) {
+            return [...tokens, before, ...rest];
+          }
         }
       }
       // Otherwise this `+` is (probably) a species charge — keep scanning.
