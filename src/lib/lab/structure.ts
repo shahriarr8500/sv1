@@ -564,7 +564,11 @@ export function solveLewis(formula: string, chargeOverride?: number): LewisOutco
   };
   enumerate(0);
 
-  if (!best) {
+  // `best` is only ever assigned inside the recursive closure above, so
+  // re-widen it here: TypeScript keeps the `= null` initializer's narrow and
+  // would otherwise treat the "solution found" branch as unreachable (`never`).
+  const solution = best as Assignment | null;
+  if (!solution) {
     return {
       ok: false,
       error:
@@ -572,13 +576,13 @@ export function solveLewis(formula: string, chargeOverride?: number): LewisOutco
     };
   }
 
-  const incomplete = best.atoms.filter((a) => a.incomplete);
+  const incomplete = solution.atoms.filter((a) => a.incomplete);
   if (incomplete.length > 0) {
     notes.push(
       `Electron-deficient: ${incomplete.map((a) => a.symbol).join(", ")} ${incomplete.length === 1 ? "does" : "do"} not reach a full octet — this really happens (e.g. BeCl₂ and BF₃ are electron-poor and very reactive).`,
     );
   }
-  const expanded = best.atoms.filter(
+  const expanded = solution.atoms.filter(
     (a) => a.owns > a.target && periodOf(a.symbol) >= 3 && a.symbol !== "H",
   );
   if (expanded.length > 0) {
@@ -586,7 +590,7 @@ export function solveLewis(formula: string, chargeOverride?: number): LewisOutco
       "Expanded octet: a period-3-or-heavier atom holds more than 8 electrons — allowed because of empty d orbitals (this is why SF₆ and PCl₅ exist but NF₅ does not).",
     );
   }
-  const charged = best.atoms.filter((a) => a.formalCharge !== 0);
+  const charged = solution.atoms.filter((a) => a.formalCharge !== 0);
   if (charged.length > 0) {
     notes.push(
       `Formal charges: ${charged.map((a) => `${a.symbol}${a.formalCharge > 0 ? "+" : ""}${a.formalCharge}`).join(", ")} (they sum to the species charge, ${charge}).`,
@@ -598,7 +602,7 @@ export function solveLewis(formula: string, chargeOverride?: number): LewisOutco
     );
   }
 
-  return finalize(symbols, best.bonds, central, totalValence, charge, notes, best.atoms);
+  return finalize(symbols, solution.bonds, central, totalValence, charge, notes, solution.atoms);
 }
 
 function finalize(

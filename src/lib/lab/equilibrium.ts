@@ -93,8 +93,8 @@ export function solveEquilibrium(input: EquilibriumInput): EquilibriumOutcome {
   // Feasible interval: A can't go negative (x < [A]0·V/a) and B can't go
   // negative (x ≥ −[B]0·V/b). f is evaluated slightly inside the A-bound.
   const eps = 1e-15;
-  const lo = concB0 > 0 ? (-concB0 * volume) / b : 0;
-  const hi = concA0 > 0 ? ((concA0 * volume) / a) * (1 - 1e-9) : -eps;
+  let lo = concB0 > 0 ? (-concB0 * volume) / b : 0;
+  let hi = concA0 > 0 ? ((concA0 * volume) / a) * (1 - 1e-9) : -eps;
 
   const fLo = f(lo);
   const fHi = f(hi);
