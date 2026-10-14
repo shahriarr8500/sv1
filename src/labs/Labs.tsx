@@ -12,6 +12,7 @@ import { ArrowLeft, FlaskConical } from "lucide-react";
 import type { ComponentType, ReactNode } from "react";
 import { Link, useParams } from "react-router";
 import StreakHeatmap from "./streak-heatmap";
+import LabTools from "./LabTools";
 
 interface LabEntry {
   slug: string;
@@ -31,6 +32,14 @@ const LABS_INDEX: LabEntry[] = [
       "GitHub-style contribution grid showing when you studied over the last 18 weeks.",
     flag: "streakHeatmap",
     Component: StreakHeatmap,
+  },
+  {
+    slug: "lab-tools",
+    title: "Physics & chemistry lab",
+    description:
+      "Six physics simulations, four chemistry calculators and a rotatable 3D molecular viewer — every result computed by the app's own tested code.",
+    flag: "labTools",
+    Component: LabTools,
   },
 ];
 

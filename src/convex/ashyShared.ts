@@ -471,3 +471,131 @@ export const MATH_VISUALIZATION_INSTRUCTION = `Interactive visuals (opt-in marke
 - Vector parameters are finite component numbers (absolute value ≤ 1000). Graph expressions use the variable x plus optional parameters a, b, c, d; allowed functions are sin, cos, tan, asin, acos, atan, sqrt, abs, exp, ln, log, floor, ceil, round, with constants pi and e.
 - The app renders the visual itself from application-owned components — the marker only carries validated numbers and a validated expression, never code.
 - The written answer must stand alone: never rely on the visual to make your point, never emit a marker for a non-math answer, and never emit more than one marker. Malformed markers are silently dropped.`;
+
+/* -------------------------------------------------------------------------- */
+/* Lab tool markers (Phase 4)                                                 */
+/* -------------------------------------------------------------------------- */
+
+/** Physics simulations the app can open (whitelist — nothing else renders). */
+export const LAB_SIM_KINDS = [
+  "motion",
+  "projectile",
+  "forces",
+  "waves",
+  "circuits",
+  "optics",
+] as const;
+export type LabSimKind = (typeof LAB_SIM_KINDS)[number];
+
+/**
+ * Structured parameters for an application-owned lab tool. The only text
+ * that crosses the boundary is a bounded, charset-checked equation/formula/
+ * molecule name — the client re-validates it and the lab's own parsers parse
+ * it again before anything renders. Never code, never a URL, never free-form
+ * instructions.
+ */
+export type LabSpec =
+  | { type: "balance"; equation: string }
+  | { type: "moles"; formula: string }
+  | { type: "lewis"; formula: string }
+  | { type: "molecule"; target: string }
+  | { type: "sim"; kind: LabSimKind }
+  | { type: "equilibrium" };
+
+/** Marker forms the model may emit (at most one per reply):
+ *  `[[lab: balance Fe + O2 -> Fe2O3]]`
+ *  `[[lab: moles C6H12O6]]`
+ *  `[[lab: lewis CO3^2-]]`
+ *  `[[lab: molecule water]]`
+ *  `[[lab: sim projectile]]`
+ *  `[[lab: equilibrium]]`
+ */
+const LAB_MARKER = /\[\[\s*lab\s*:\s*([^\n]{0,400}?)\]\]/i;
+const LAB_MARKER_GLOBAL = /\s*\[\[\s*lab\s*:\s*[^\n]{0,400}?\]\]/gi;
+
+/** Same arrow set the equation parser accepts (src/lib/lab/equation.ts). */
+const LAB_ARROW = /(<=>|<->|-->|->|→|⇒|⇌|=)/;
+const LAB_EQUATION_CHARSET = /^[A-Za-z0-9+\-*\/^()<>=\[\].\s→⇌⇒]+$/;
+const LAB_FORMULA_CHARSET = /^[A-Za-z0-9+\-^().·]+$/;
+const LAB_TARGET_CHARSET = /^[A-Za-z0-9()\- ]+$/;
+
+/** Parses one `lab:` payload; null when malformed (caller strips it anyway). */
+function parseLabPayload(payload: string): LabSpec | null {
+  const text = payload.trim();
+  const match = /^(balance|moles|lewis|molecule|sim|equilibrium)\b\s*([\s\S]*)$/i.exec(text);
+  if (!match) return null;
+  const tool = (match[1] ?? "").toLowerCase();
+  const rest = (match[2] ?? "").trim();
+
+  if (tool === "equilibrium") {
+    // No parameters: the tool opens with its defaults and the student sets Kc.
+    return rest === "" ? { type: "equilibrium" } : null;
+  }
+
+  if (tool === "sim") {
+    const kind = rest.toLowerCase();
+    return (LAB_SIM_KINDS as readonly string[]).includes(kind)
+      ? { type: "sim", kind: kind as LabSimKind }
+      : null;
+  }
+
+  if (tool === "balance") {
+    // Mirrors MAX_EQUATION_LENGTH (300) in src/lib/lab/equation.ts.
+    if (rest.length < 4 || rest.length > 300) return null;
+    if (!LAB_EQUATION_CHARSET.test(rest)) return null;
+    if (!LAB_ARROW.test(rest)) return null;
+    return { type: "balance", equation: rest };
+  }
+
+  if (tool === "moles" || tool === "lewis") {
+    // Mirrors MAX_FORMULA_LENGTH (120) in src/lib/lab/formula.ts.
+    const compact = rest.replace(/\s+/g, "");
+    if (compact.length === 0 || compact.length > 120) return null;
+    if (!LAB_FORMULA_CHARSET.test(compact)) return null;
+    return { type: tool, formula: compact };
+  }
+
+  // tool === "molecule": a bundled id, formula or name (client re-checks
+  // the whitelist against structures.ts before rendering).
+  if (rest.length === 0 || rest.length > 60) return null;
+  if (!LAB_TARGET_CHARSET.test(rest)) return null;
+  return { type: "molecule", target: rest };
+}
+
+/**
+ * Extracts at most ONE `[[lab: …]]` marker from a model reply. The marker is
+ * always stripped from the visible text; the structured spec is returned
+ * only when every field passed validation — a malformed marker degrades to a
+ * normal text answer, never to a broken tool, and never to executed code.
+ */
+export function extractLabMarker(text: string): {
+  clean: string;
+  lab: LabSpec | null;
+} {
+  let lab: LabSpec | null = null;
+  const match = LAB_MARKER.exec(text);
+  if (match) {
+    lab = parseLabPayload(match[1] ?? "");
+  }
+  const clean = text
+    .replace(LAB_MARKER_GLOBAL, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return { clean, lab };
+}
+
+/**
+ * System instruction for offering the lab tools. Kept here — pure and
+ * testable — so the chat action only injects it.
+ */
+export const LAB_TOOL_INSTRUCTION = `Lab tools (opt-in markers):
+- When a physics or chemistry question would genuinely benefit from an interactive tool you MAY emit exactly ONE lab marker, on its own line, picking the single best fit:
+  [[lab: balance <equation>]] — a full chemical equation to balance (include an arrow: ->, →, ⇌ or =)
+  [[lab: moles <formula>]] — a molar mass / moles / concentration calculation
+  [[lab: lewis <formula>]] — a main-group species (≤ 16 atoms) whose electron pairs or shape matters
+  [[lab: molecule <name or formula>]] — a small bundled molecule whose 3D shape helps (water, methane, CO2, …)
+  [[lab: sim <motion|projectile|forces|waves|circuits|optics>]] — a physics situation a simulation would clarify
+  [[lab: equilibrium]] — a Kc / ICE-table problem
+- The app opens its own lab tool from application-owned components; the marker only carries a whitelisted kind plus bounded validated text (equation/formula/molecule name), never code, never a URL.
+- Emit at most ONE marker of any kind per reply (a lab marker OR an explore visual, never both), only when the tool adds real value, and never for general writing, history or coding answers. The written answer must stand alone without the tool. Malformed markers are silently dropped.`;

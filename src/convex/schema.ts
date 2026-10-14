@@ -242,12 +242,39 @@ const schema = defineSchema(
       grounded: v.optional(v.boolean()),
       searchEntryPointUrl: v.optional(v.string()),
       chips: v.optional(v.array(v.string())),
-      planMissions: v.optional(
+    planMissions: v.optional(
+      v.object({
+        itemIds: v.array(v.string()),
+        labels: v.array(v.string()),
+      }),
+    ),
+    /**
+     * One validated lab-tool spec (Phase 4): whitelist kind + bounded,
+     * charset-checked equation/formula/molecule text. The chat action parses
+     * it from a `[[lab: …]]` marker in the reply (extractLabMarker) and the
+     * client re-validates it again before opening any tool. Plain objects —
+     * AI-generated code is never stored or executed.
+     */
+    lab: v.optional(
+      v.union(
+        v.object({ type: v.literal("balance"), equation: v.string() }),
+        v.object({ type: v.literal("moles"), formula: v.string() }),
+        v.object({ type: v.literal("lewis"), formula: v.string() }),
+        v.object({ type: v.literal("molecule"), target: v.string() }),
         v.object({
-          itemIds: v.array(v.string()),
-          labels: v.array(v.string()),
+          type: v.literal("sim"),
+          kind: v.union(
+            v.literal("motion"),
+            v.literal("projectile"),
+            v.literal("forces"),
+            v.literal("waves"),
+            v.literal("circuits"),
+            v.literal("optics"),
+          ),
         }),
+        v.object({ type: v.literal("equilibrium") }),
       ),
+    ),
       /**
        * Phase 3: at most one validated interactive-visual spec per answer.
        * Only the shapes below may ever render — the client re-validates

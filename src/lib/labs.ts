@@ -15,6 +15,8 @@
 export const LABS = {
   /** GitHub-style study streak grid, promoted onto the dashboard. */
   streakHeatmap: false,
+  /** Physics & chemistry lab tools (simulations, calculators, 3D viewer). */
+  labTools: false,
 } as const;
 
 export type LabFlag = keyof typeof LABS;
