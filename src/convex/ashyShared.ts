@@ -376,7 +376,7 @@ export const DOCUMENT_INSTRUCTION = `Documents (PDF notes and study material):
 - NEVER invent text, page numbers, formulas, tables, diagrams or citations that are not in the document. Scanned pages and handwriting can be hard to read: if something is blurry, cut off or ambiguous, say which page it is on and ask for a clearer photo or crop instead of guessing.
 - Bangla and English content are both supported, including mixed-language notes and handwriting. Keep each language in its own script (never transliterate one into the other) and preserve mathematics in LaTeX.
 - When asked for a summary, explanation, revision notes, flashcards or practice questions about an attached document, build them strictly from the document's content, and say plainly when the document does not cover part of the request.
-- If a question needs pages that are not attached and are not already covered earlier in this conversation, say so plainly and tell the student to open the document in the reader and use "Ask about page" or the page-range option — then offer to help with what IS in front of you. The file itself is NOT re-sent with every later message; never claim you cannot open files.`;
+- If a question needs pages that are not attached and are not already covered earlier in this conversation, say so plainly and tell the student to open the document in the reader and use "Ask about page" or the page-range option — or, for the whole document, "Summarize entire PDF", which processes every page in batches — then offer to help with what IS in front of you. NEVER tell the student they can only ask about one page at a time: page ranges and batched whole-document summaries exist. The file itself is NOT re-sent with every later message; never claim you cannot open files.`;
 
 /* -------------------------------------------------------------------------- */
 /* Interactive visual markers (Phase 3)                                        */
@@ -515,7 +515,7 @@ const LAB_MARKER_GLOBAL = /\s*\[\[\s*lab\s*:\s*[^\n]{0,400}?\]\]/gi;
 
 /** Same arrow set the equation parser accepts (src/lib/lab/equation.ts). */
 const LAB_ARROW = /(<=>|<->|-->|->|→|⇒|⇌|=)/;
-const LAB_EQUATION_CHARSET = /^[A-Za-z0-9+\-*\/^()<>=\[\].\s→⇌⇒]+$/;
+const LAB_EQUATION_CHARSET = /^[A-Za-z0-9+\-*^()<>=[\].\s→⇌⇒]+$/;
 const LAB_FORMULA_CHARSET = /^[A-Za-z0-9+\-^().·]+$/;
 const LAB_TARGET_CHARSET = /^[A-Za-z0-9()\- ]+$/;
 
@@ -592,10 +592,198 @@ export function extractLabMarker(text: string): {
 export const LAB_TOOL_INSTRUCTION = `Lab tools (opt-in markers):
 - When a physics or chemistry question would genuinely benefit from an interactive tool you MAY emit exactly ONE lab marker, on its own line, picking the single best fit:
   [[lab: balance <equation>]] — a full chemical equation to balance (include an arrow: ->, →, ⇌ or =)
-  [[lab: moles <formula>]] — a molar mass / moles / concentration calculation
+  [[lab: moles <formula>]] — a molar mass / moles / concentration / dilution calculation
   [[lab: lewis <formula>]] — a main-group species (≤ 16 atoms) whose electron pairs or shape matters
   [[lab: molecule <name or formula>]] — a small bundled molecule whose 3D shape helps (water, methane, CO2, …)
   [[lab: sim <motion|projectile|forces|waves|circuits|optics>]] — a physics situation a simulation would clarify
   [[lab: equilibrium]] — a Kc / ICE-table problem
+- Routing (pick exactly one, or none):
+  * "interactive motion simulation" / changing velocity, acceleration or time over a run → [[lab: sim motion]]
+  * projectile motion with launch speed, angle, trajectory, flight time, maximum height or range → [[lab: sim projectile]]
+  * "balance this equation" / balancing a chemical equation (put the equation itself in the marker) → [[lab: balance <equation>]]
+  * molar mass, moles, concentration or dilution calculations → [[lab: moles <formula>]] (put the formula in the marker)
+  * "structure of a molecule" / exploring a molecule's 3D shape → [[lab: molecule <name or formula>]]
+  * a plain request to graph a mathematical function (e.g. "graph y = x^2") stays with the [[explore: graph …]] visual — never a lab marker
+  * a conceptual question ("why", "explain", "describe") with no request for a tool or calculator gets NO marker at all — answer it normally
 - The app opens its own lab tool from application-owned components; the marker only carries a whitelisted kind plus bounded validated text (equation/formula/molecule name), never code, never a URL.
 - Emit at most ONE marker of any kind per reply (a lab marker OR an explore visual, never both), only when the tool adds real value, and never for general writing, history or coding answers. The written answer must stand alone without the tool. Malformed markers are silently dropped.`;
+
+/* -------------------------------------------------------------------------- */
+/* Deterministic lab-intent routing (fallback when the model omits a marker)  */
+/* -------------------------------------------------------------------------- */
+
+/** One token of a chemical equation: coefficient + formula, or a bare number. */
+const EQ_TOKEN = String.raw`(?:\d*\s*[A-Za-z][A-Za-z0-9()\-]*\d*|\d+)`;
+/** The longest equation-looking run around an arrow inside a student message. */
+const EQ_CANDIDATE = new RegExp(
+  `${EQ_TOKEN}(?:\\s*\\+\\s*${EQ_TOKEN})*\\s*(?:<=>|<->|-->|->|→|⇒|⇌|=)\\s*${EQ_TOKEN}(?:\\s*\\+\\s*${EQ_TOKEN})*`,
+);
+
+/** First formula-looking word after "of"/"for", else the first in the text. */
+function extractFormulaCandidate(text: string): string | null {
+  const afterOf =
+    /\b(?:molar mass|moles?|concentration|mass|of|for)\s+([A-Z][A-Za-z0-9·()⁻²³+-]{1,25})\b/.exec(
+      text,
+    );
+  const anyFormula = /\b([A-Z][A-Za-z0-9·()⁻²³+-]{1,25})\b/.exec(text);
+  const raw = (afterOf?.[1] ?? anyFormula?.[1] ?? "").replace(/[.,;:]+$/, "");
+  if (raw.length === 0 || raw.length > 120) return null;
+  return LAB_FORMULA_CHARSET.test(raw) ? raw : null;
+}
+
+/** The molecule name/formula right before (or after) the word "molecule". */
+function extractMoleculeCandidate(text: string): string | null {
+  const STOP = new Set([
+    "a", "an", "the", "this", "that", "small", "simple", "organic", "its", "one",
+  ]);
+  const patterns = [
+    /\b(?:of|for|the)\s+(?:a|an|the)?\s*([A-Za-z][A-Za-z0-9-]{0,30}?)\s+molecule\b/i,
+    /\bmolecule\s+(?:of|for)\s+([A-Za-z][A-Za-z0-9-]{0,30})\b/i,
+    /\b([A-Za-z][A-Za-z0-9-]{0,30})\s+molecule\b/i,
+  ];
+  for (const pattern of patterns) {
+    const match = pattern.exec(text);
+    const raw = (match?.[1] ?? "").trim();
+    if (!raw) continue;
+    if (STOP.has(raw.toLowerCase())) continue;
+    if (raw.length > 60) continue;
+    if (LAB_TARGET_CHARSET.test(raw)) return raw;
+  }
+  return null;
+}
+
+/**
+ * Deterministic intent router — the reliability backstop for Issue 2.
+ *
+ * The model is instructed to emit the best lab marker itself, but a reply
+ * that forgets (or wrongly picks a graph for a simulation request) must not
+ * strand the student on a generic visual. This pure function only fires on
+ * UNAMBIGUOUS tool intent: it requires an explicit tool word (simulate /
+ * balance / calculate / molecule-shape) AND the matching subject context, so
+ * a conceptual question ("explain projectile motion") or a plain graph
+ * request ("graph y = x^2") returns null and stays a normal answer.
+ *
+ * Returns a fully-bounded spec — same charsets/lengths as parseLabPayload —
+ * or null when no tool is clearly wanted (or the needed parameter, like the
+ * equation or formula, could not be identified confidently).
+ */
+export function routeLabIntent(text: string): LabSpec | null {
+  const message = text.trim().slice(0, 2000);
+  if (!message) return null;
+
+  const toolIntent =
+    /\b(simulat\w*|simulation|simulator|\bsim\b|interactive|calculator|visuali[sz]e)\b/i.test(
+      message,
+    );
+
+  // --- physics simulations (projectile checked first: it also says "motion")
+  const projectileSubject = /\bprojectile\b/i.test(message);
+  if (projectileSubject &&
+    (toolIntent || /\b(trajectory|launch|thrown|throw|at an angle)\b/i.test(message))) {
+    return { type: "sim", kind: "projectile" };
+  }
+  if (toolIntent) {
+    if (/\b(forces?|free[- ]?body|newton'?s)\b/i.test(message)) {
+      return { type: "sim", kind: "forces" };
+    }
+    if (/\b(waves?|oscillat\w*|\bshm\b)\b/i.test(message)) {
+      return { type: "sim", kind: "waves" };
+    }
+    if (/\b(circuits?|ohm'?s|resistance|current)\b/i.test(message)) {
+      return { type: "sim", kind: "circuits" };
+    }
+    if (/\b(optics?|lenses?|snell|refraction|mirrors?)\b/i.test(message)) {
+      return { type: "sim", kind: "optics" };
+    }
+    if (
+      /\b(motion|velocity|acceleration|accelerating|displacement|speed|position[- ]time|distance[- ]time|[vxv]-?t graph)\b/i.test(
+        message,
+      )
+    ) {
+      return { type: "sim", kind: "motion" };
+    }
+  }
+  // "Projectile motion simulation" without the word projectile? Covered by
+  // launch/angle above; a projectile request WITHOUT tool intent falls
+  // through to null on purpose — that is a conceptual question.
+
+  // --- equation balancing -------------------------------------------------
+  const wantsBalance = /\bbalanc\w*\b/i.test(message);
+  const equationish =
+    EQ_CANDIDATE.test(message) || /chemical equation/i.test(message);
+  if (wantsBalance && equationish) {
+    const match = EQ_CANDIDATE.exec(message);
+    const equation = match?.[0].trim() ?? "";
+    if (
+      equation.length >= 4 &&
+      equation.length <= 300 &&
+      LAB_EQUATION_CHARSET.test(equation) &&
+      LAB_ARROW.test(equation)
+    ) {
+      return { type: "balance", equation };
+    }
+  }
+
+  // --- moles / molar mass / concentration / dilution ---------------------
+  const quantitySubject =
+    /\b(molar mass|moles?|concentration|dilution|molarity)\b/i.test(message);
+  const wantsCalc =
+    /\b(calculat\w*|convert|find|determine|how (?:many|much)|what (?:is|are))\b/i.test(
+      message,
+    );
+  if (quantitySubject && wantsCalc) {
+    const formula = extractFormulaCandidate(message);
+    if (formula && formula.length <= 120) return { type: "moles", formula };
+  }
+
+  // --- molecule explorer ---------------------------------------------------
+  const moleculeSubject = /\bmolecules?\b/i.test(message);
+  const wantsShape =
+    /\b(structure|shape|viewer|view|3d|three[- ]dimensional|explore|model|ball[- ]and[- ]stick)\b/i.test(
+      message,
+    );
+  if (moleculeSubject && wantsShape) {
+    const target = extractMoleculeCandidate(message);
+    if (target) return { type: "molecule", target };
+  }
+
+  // No unambiguous tool intent — the answer stays a normal explanation
+  // (or the explore visual handles a pure graph request on its own).
+  return null;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Reply visual resolution (markers + deterministic fallback + priority)      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Turns a raw model reply into the visual spec(s) the client may render.
+ *
+ * Policy, in one testable place:
+ * 1. Both `[[lab: …]]` and `[[explore: …]]` markers are ALWAYS stripped from
+ *    the visible text — students never see marker syntax.
+ * 2. With markers allowed (not a plan/transcription reply): a valid lab
+ *    marker wins. If the model emitted none, the deterministic intent router
+ *    gets one chance to supply one from the student's own question — this is
+ *    what stops an "interactive simulation" request from degrading into a
+ *    generic graph.
+ * 3. An explore visual attaches only when NO lab tool is opening (the
+ *    instructions say one marker of any kind per reply; a lab tool is the
+ *    more specific answer, so it has priority).
+ * 4. When markers are disallowed, the reply is still stripped and nothing
+ *    attaches.
+ */
+export function resolveReplyVisuals(options: {
+  text: string;
+  allow: boolean;
+  userText: string;
+}): { clean: string; lab: LabSpec | null; explore: ExploreSpec | null } {
+  const labbed = extractLabMarker(options.text);
+  const explored = extractExploreMarker(labbed.clean);
+  const clean = explored.clean;
+  if (!options.allow) return { clean, lab: null, explore: null };
+
+  const lab = labbed.lab ?? routeLabIntent(options.userText);
+  const explore = lab ? null : explored.explore;
+  return { clean, lab, explore };
+}

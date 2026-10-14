@@ -217,8 +217,8 @@ const BALANCE_LIMITS = [
 
 type BalanceMode = "balance" | "check";
 
-export function BalanceTool() {
-  const [text, setText] = useState(PRESETS[0].equation);
+export function BalanceTool({ initialEquation }: ChemToolProps = {}) {
+  const [text, setText] = useState(initialEquation?.trim() || PRESETS[0].equation);
   const [mode, setMode] = useState<BalanceMode>("balance");
   const [guess, setGuess] = useState<string[]>([]);
 
@@ -381,8 +381,8 @@ function parsePositive(raw: string): number | null {
   return value;
 }
 
-export function QuantitiesTool() {
-  const [formula, setFormula] = useState("C6H12O6");
+export function QuantitiesTool({ initialFormula }: ChemToolProps = {}) {
+  const [formula, setFormula] = useState(initialFormula?.trim() || "C6H12O6");
   const [mode, setMode] = useState<ConvertMode>("mass-to-moles");
   const [mass, setMass] = useState("180");
   const [moles, setMoles] = useState("1");
@@ -738,10 +738,10 @@ function LewisDiagram({
   );
 }
 
-export function StructureTool() {
-  const [mode, setMode] = useState<StructureMode>("electron");
+export function StructureTool({ initialFormula, initialMode }: ChemToolProps = {}) {
+  const [mode, setMode] = useState<StructureMode>(initialMode ?? "electron");
   const [symbol, setSymbol] = useState("Fe");
-  const [formula, setFormula] = useState("H2O");
+  const [formula, setFormula] = useState(initialFormula?.trim() || "H2O");
 
   const atom = atomInfo(symbol.trim());
   const lewis = solveLewis(formula.trim());
@@ -1021,11 +1021,25 @@ export function EquilibriumTool() {
 
 export type ChemToolKind = "balance" | "quantities" | "structure" | "equilibrium";
 
+/**
+ * Optional prefills for tools launched from Ashy's `[[lab: …]]` marker
+ * (Issue 2). Every field is bounded text already validated twice before it
+ * gets here; tools fall back to their own defaults when the prop is absent.
+ */
+export interface ChemToolProps {
+  /** Balance tool: a student/model-supplied equation to start from. */
+  initialEquation?: string;
+  /** Quantities / structure tools: a formula to start from (e.g. H2O). */
+  initialFormula?: string;
+  /** Structure tool: which half of the tool to open. */
+  initialMode?: "electron" | "lewis";
+}
+
 export interface ChemToolEntry {
   kind: ChemToolKind;
   title: string;
   subtitle: string;
-  Component: ComponentType;
+  Component: ComponentType<ChemToolProps>;
 }
 
 export const CHEM_TOOLS: readonly ChemToolEntry[] = [

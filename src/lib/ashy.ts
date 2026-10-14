@@ -71,6 +71,8 @@ export interface AshyMessage {
   searchNoticeKind?: "userLimit" | "providerQuota" | "other";
   /** Phase 3 (math): one validated interactive-visual spec for this answer. */
   explore?: AshyExplore;
+  /** Phase 4 (lab): one validated interactive lab-tool spec for this answer. */
+  lab?: AshyLab;
 }
 
 /**
@@ -81,6 +83,30 @@ export interface AshyMessage {
 export type AshyExplore =
   | { type: "vectors"; ax: number; ay: number; bx: number; by: number }
   | { type: "graph"; expression: string };
+
+/**
+ * One interactive lab-tool spec (Phase 4). Only these six shapes exist —
+ * mirrored from the server's LabSpec — and the client re-validates every
+ * field (whitelist kind, charset, length, bundled-molecule check) in
+ * `validateLabSpec` before any tool renders, so a stored row can never
+ * smuggle anything else past validation. Never code, never a URL.
+ */
+export type AshyLab =
+  | { type: "balance"; equation: string }
+  | { type: "moles"; formula: string }
+  | { type: "lewis"; formula: string }
+  | { type: "molecule"; target: string }
+  | {
+      type: "sim";
+      kind:
+        | "motion"
+        | "projectile"
+        | "forces"
+        | "waves"
+        | "circuits"
+        | "optics";
+    }
+  | { type: "equilibrium" };
 
 /** One real, backend-searched YouTube video. */
 export interface AshyVideo {

@@ -20,14 +20,21 @@ import {
   PDF_LOCAL_ONLY_NOTICE,
   PDF_MIME_TYPE,
   PDF_REJECTION_COPY,
+  PDF_SUMMARY_BATCH_SIZE,
+  batchSummaryPrompt,
   clampPageRange,
   countPdfPageMarkers,
   decodeBase64,
   documentAttachmentMarker,
+  finalSummaryPrompt,
   hasPdfSignature,
   isEncryptedPdf,
+  pageRangeBatches,
+  pageSelectionLabel,
   pagesAttachmentMarker,
+  parsePageSelection,
   pdfUploadDisposition,
+  rangeToPages,
   sanitizePdfName,
   validatePdfAttachment,
   validatePdfBytes,
@@ -205,7 +212,11 @@ assert(
 assert(MAX_PDF_BYTES === 6 * 1024 * 1024, "PDF size cap is exactly 6 MB");
 assert(MAX_PDF_CHARS === 8_000_000, "PDF base64 cap is exactly 8,000,000 chars");
 assert(MAX_PDF_PAGES === 80, "whole-document page budget is exactly 80");
-assert(MAX_SELECTED_PAGES === 6, "selected-page question cap is exactly 6");
+assert(MAX_SELECTED_PAGES === 8, "selected-page question cap is exactly 8 (= MAX_IMAGES_TOTAL)");
+assert(
+  PDF_SUMMARY_BATCH_SIZE === MAX_SELECTED_PAGES,
+  "whole-document batches are sized to the same per-request image budget",
+);
 assert(MAX_PDFS_PER_MESSAGE === 1, "one PDF per message");
 assert(PDF_MIME_TYPE === "application/pdf", "PDF MIME constant");
 for (const reason of [
@@ -533,6 +544,178 @@ assert(
 assert(
   PDF_REJECTION_COPY.tooManyPages.includes("read-only copy"),
   "the page-cap copy points at the read-only reader, a real next step",
+);
+assert(
+  /Summarize entire PDF/.test(PDF_REJECTION_COPY.tooManyPages),
+  "the page-cap copy offers the batched whole-document alternative",
+);
+
+/* -------------------------------------------------------------------------- */
+/* 15. Page selection: parsing, validation, labels, batching (Issue 1)        */
+/* -------------------------------------------------------------------------- */
+
+// Required scenario: a 100-page PDF, explain pages 5–12.
+const required = parsePageSelection("5-12", 100);
+assert(
+  required.ok &&
+    JSON.stringify(required.pages) ===
+      JSON.stringify([5, 6, 7, 8, 9, 10, 11, 12]),
+  "100-page PDF: selecting 5-12 yields exactly pages 5..12, in page order",
+);
+assert(
+  required.ok && required.pages.length <= MAX_SELECTED_PAGES,
+  "the required 5–12 selection fits the per-question cap",
+);
+assert(
+  required.ok &&
+    pageSelectionLabel(required.pages, "notes.pdf") === "Pages 5–12 of notes.pdf",
+  "range label shows the selected range and the document name",
+);
+assert(
+  required.ok &&
+    pagesAttachmentMarker(pageSelectionLabel(required.pages, "notes.pdf")) ===
+      "[Attached: Pages 5–12 of notes.pdf]",
+  "the attachment marker identifies exactly the selected range (reused by reload hydration and retry)",
+);
+
+const enDash = parsePageSelection("5–12", 100);
+assert(
+  enDash.ok && enDash.pages[0] === 5 && enDash.pages[7] === 12,
+  "en-dash ranges parse the same as hyphens",
+);
+
+const single = parsePageSelection("7", 100);
+assert(
+  single.ok && JSON.stringify(single.pages) === JSON.stringify([7]),
+  "a single page parses",
+);
+assert(
+  single.ok && pageSelectionLabel(single.pages, "a.pdf") === "Page 7 of a.pdf",
+  "single-page label",
+);
+
+const listSelection = parsePageSelection("1, 3, 5-8", 100);
+assert(
+  listSelection.ok &&
+    JSON.stringify(listSelection.pages) === JSON.stringify([1, 3, 5, 6, 7, 8]),
+  "a custom selection parses to ordered pages",
+);
+assert(
+  listSelection.ok &&
+    pageSelectionLabel(listSelection.pages, "a.pdf") === "Pages 1, 3, 5–8 of a.pdf",
+  "sparse label groups contiguous runs",
+);
+
+const deduped = parsePageSelection("3,3,5", 100);
+assert(
+  deduped.ok && JSON.stringify(deduped.pages) === JSON.stringify([3, 5]),
+  "duplicate pages are de-duplicated, order preserved",
+);
+
+// --- Rejections: each names the problem and the valid form -----------------
+const zero = parsePageSelection("0", 100);
+assert(
+  !zero.ok && /start at 1/.test(zero.error),
+  "page 0 is rejected with a clear message",
+);
+const reversed = parsePageSelection("12-5", 100);
+assert(
+  !reversed.ok && /backwards/.test(reversed.error) && /5–12/.test(reversed.error),
+  "a reversed range is rejected and names the correction",
+);
+const beyond = parsePageSelection("120", 100);
+assert(
+  !beyond.ok && /beyond/.test(beyond.error) && /100/.test(beyond.error),
+  "a page beyond the document is rejected, stating the total",
+);
+const garbage = parsePageSelection("abc", 100);
+assert(
+  !garbage.ok && /isn't a page number/.test(garbage.error),
+  "non-page text is rejected with the valid forms",
+);
+const emptySelection = parsePageSelection(" ", 100);
+assert(
+  !emptySelection.ok && emptySelection.error.length > 0,
+  "empty input is rejected with a message",
+);
+const halfEntered = parsePageSelection("5-", 100);
+assert(
+  !halfEntered.ok && halfEntered.error.length > 0,
+  "a half-entered range shows validation copy instead of silently sending",
+);
+const overCap = parsePageSelection("1-30", 100);
+assert(
+  !overCap.ok &&
+    overCap.error.includes(`at most ${MAX_SELECTED_PAGES}`) &&
+    overCap.error.includes("Summarize entire PDF"),
+  "an over-limit selection is rejected AND offers both real alternatives (smaller range, batched summary)",
+);
+const unknownCount = parsePageSelection("5-9", 0);
+assert(
+  !unknownCount.ok && unknownCount.error.length > 0,
+  "selection before the page count is known is rejected, not guessed",
+);
+
+// --- Bounded batching for whole-document summaries -------------------------
+const batches = pageRangeBatches(100);
+assert(
+  batches.length === Math.ceil(100 / PDF_SUMMARY_BATCH_SIZE),
+  "a 100-page document batches into bounded requests",
+);
+assert(
+  batches[0]?.from === 1 && batches[0]?.to === PDF_SUMMARY_BATCH_SIZE,
+  "the first batch starts at page 1",
+);
+assert(
+  batches[batches.length - 1]?.to === 100,
+  "the last batch ends at the final page",
+);
+const flattened = batches.flatMap(rangeToPages);
+assert(
+  flattened.length === 100 && flattened.every((page, index) => page === index + 1),
+  "the batch plan covers pages 1..100 in order — no gap, no overlap",
+);
+assert(
+  batches.every((batch) => batch.to - batch.from + 1 <= MAX_SELECTED_PAGES),
+  "every batch fits the per-request image budget",
+);
+assert(pageRangeBatches(3).length === 1, "a short document is a single batch");
+assert(pageRangeBatches(0).length === 0, "an empty document has no batches");
+
+// --- Staged-summary prompts ------------------------------------------------
+const sectionPrompt = batchSummaryPrompt(
+  { index: 2, total: batches.length, from: 9, to: 16 },
+  "notes.pdf",
+);
+assert(
+  sectionPrompt.includes("9–16") &&
+    sectionPrompt.includes(`Section 2 of ${batches.length}`),
+  "the batch prompt names its own pages and its position in the plan",
+);
+assert(
+  /cite the page number/.test(sectionPrompt),
+  "the batch prompt demands page citations",
+);
+assert(
+  sectionPrompt.includes("outside 9–16"),
+  "the batch prompt forbids content from pages it was not given",
+);
+const combinedPrompt = finalSummaryPrompt("notes.pdf", 100, batches);
+assert(
+  combinedPrompt.includes("Pages covered: 1–100"),
+  "the final prompt requires an explicit coverage line",
+);
+assert(
+  combinedPrompt.includes(`${batches.length} ordered batches`),
+  "the final prompt states how many batches were processed",
+);
+assert(
+  /do not add anything new/.test(combinedPrompt),
+  "the final prompt forbids content that was never in a section summary",
+);
+assert(
+  combinedPrompt.includes("do not skip any section"),
+  "the final prompt forbids dropping sections",
 );
 
 /* -------------------------------------------------------------------------- */

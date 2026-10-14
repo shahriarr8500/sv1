@@ -264,6 +264,7 @@ export const getConversation = query({
           chips: row.chips,
           planMissions: row.planMissions,
           explore: row.explore,
+          lab: row.lab,
         };
       }),
     );
@@ -695,6 +696,31 @@ export const appendReply = mutation({
         v.object({ type: v.literal("graph"), expression: v.string() }),
       ),
     ),
+    /**
+     * Phase 4: one validated lab-tool spec parsed from a `[[lab: …]]` marker
+     * (or the deterministic intent router) — whitelist kind + bounded text.
+     * The client re-validates it again before any tool opens.
+     */
+    lab: v.optional(
+      v.union(
+        v.object({ type: v.literal("balance"), equation: v.string() }),
+        v.object({ type: v.literal("moles"), formula: v.string() }),
+        v.object({ type: v.literal("lewis"), formula: v.string() }),
+        v.object({ type: v.literal("molecule"), target: v.string() }),
+        v.object({
+          type: v.literal("sim"),
+          kind: v.union(
+            v.literal("motion"),
+            v.literal("projectile"),
+            v.literal("forces"),
+            v.literal("waves"),
+            v.literal("circuits"),
+            v.literal("optics"),
+          ),
+        }),
+        v.object({ type: v.literal("equilibrium") }),
+      ),
+    ),
   },
   handler: async (ctx, args) => {
     const userId = await requireWritableUser(ctx);
@@ -731,6 +757,7 @@ export const appendReply = mutation({
       chips: args.chips,
       planMissions: args.planMissions,
       explore: args.explore,
+      lab: args.lab,
     });
     await ctx.db.patch(conversation._id, {
       lastSeq: seq,

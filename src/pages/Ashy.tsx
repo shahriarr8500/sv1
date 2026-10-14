@@ -63,6 +63,7 @@ import type { Id } from "@/convex/_generated/dataModel";
 import { cn } from "@/lib/utils";
 import { MessageContent } from "@/components/ashy/MessageContent";
 import { ExplorePanel } from "@/components/ashy/ExplorePanel";
+import { LabPanel } from "@/components/ashy/LabPanel";
 import { CameraCaptureDialog } from "@/components/ashy/CameraCaptureDialog";
 import {
   AshyVideoCard,
@@ -95,12 +96,20 @@ import {
   formatFileSize,
   hasPdfSignature,
   isAcceptedImageMime,
+  batchSummaryPrompt,
+  finalSummaryPrompt,
+  MAX_IMAGES_TOTAL,
+  MAX_SELECTED_PAGES,
   mimeTypeFromDataUrl,
+  pageRangeBatches,
+  pageSelectionLabel,
   pagesAttachmentMarker,
+  PDF_SUMMARY_BATCH_SIZE,
+  rangeToPages,
   sanitizePdfName,
   validatePdfBytes,
 } from "@/lib/ashy-attachments";
-import { PdfViewer } from "@/components/ashy/PdfViewer";
+import { PdfViewer, renderPdfPageBatch } from "@/components/ashy/PdfViewer";
 import {
   ASHY_FAILURE_COPY,
   ASHY_STARTERS,
@@ -144,7 +153,14 @@ const SMART_CHIPS = [
 /* Pieces                                                                      */
 /* -------------------------------------------------------------------------- */
 
-function ThinkingIndicator({ searching }: { searching?: boolean }) {
+function ThinkingIndicator({
+  searching,
+  stage,
+}: {
+  searching?: boolean;
+  /** Live stage of a staged whole-document summary (Issue 1). */
+  stage?: string | null;
+}) {
   return (
     <li className="flex items-center gap-3">
       <span
@@ -166,6 +182,11 @@ function ThinkingIndicator({ searching }: { searching?: boolean }) {
             ))}
           </span>
         </span>
+        {stage ? (
+          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            {stage}
+          </span>
+        ) : null}
         {searching ? (
           <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <Globe className="size-3.5" aria-hidden />
@@ -300,6 +321,8 @@ export default function AshyPage() {
     name: string;
     size?: number;
   } | null>(null);
+  /** Live stage label while the staged whole-document summary runs. */
+  const [summaryStage, setSummaryStage] = useState<string | null>(null);
   /**
    * Phase 2: rendered PDF pages waiting to be asked about ("Ask about page
    * 3" in the reader). Stored as JPEG data URLs and sent through the normal
@@ -779,6 +802,7 @@ export default function AshyPage() {
           chips: result.chips,
           planMissions: result.planMissions,
           explore: result.explore,
+          lab: result.lab,
         };
         addPending(params.conversationId, assistantMessage);
         // Persist the answer (idempotent). If this write fails the local
@@ -798,6 +822,7 @@ export default function AshyPage() {
           chips: assistantMessage.chips,
           planMissions: assistantMessage.planMissions,
           explore: assistantMessage.explore,
+          lab: assistantMessage.lab,
         }).catch(() => {
           // Local copy already shown — nothing else to do.
         });
@@ -811,6 +836,9 @@ export default function AshyPage() {
           error: result.kind,
         });
       }
+      // The staged PDF-summary flow needs to know whether THIS batch
+      // succeeded (false = the reply failed; undefined = stopped/superseded).
+      return result.ok;
     },
     [chatAction, context, searchMode, prefs.answerLength, addPending, appendReplyMut],
   );
@@ -820,9 +848,16 @@ export default function AshyPage() {
       overrideText?: string,
       requestKind: "ask" | "transcribe" = "ask",
       contextPdfStorageId?: string | null,
+      /**
+       * Quick actions ("Explain this page" / "Explain selected pages") pass
+       * their rendered pages directly: React state updates are async, so the
+       * send must not depend on `pendingPages` having flushed yet.
+       */
+      pagesOverride?: { label: string; images: string[] } | null,
     ) => {
       if (busy) return;
       const text = (overrideText ?? draft).trim();
+      const pages = pagesOverride ?? pendingPages;
       // The declared type is derived from the data URL itself (the cropper
       // re-encodes to JPEG; older drafts may hold PNG/WebP). The backend
       // re-derives the MIME from the bytes anyway — this is for consistency.
@@ -834,7 +869,7 @@ export default function AshyPage() {
         });
       }
       // Phase 2: rendered PDF pages ride the same image pipeline.
-      for (const dataUrl of pendingPages?.images ?? []) {
+      for (const dataUrl of pages?.images ?? []) {
         images.push({
           mimeType: mimeTypeFromDataUrl(dataUrl),
           data: stripDataUrlPrefix(dataUrl),
@@ -842,10 +877,10 @@ export default function AshyPage() {
       }
       // Phase 2: a local-only read-only copy is never uploaded — its bytes
       // stay on the device, so a question about it must carry rendered pages.
-      if (pendingPdf?.localOnly && (pendingPages?.images.length ?? 0) === 0) {
-        toast("Ask about specific pages first", {
+      if (pendingPdf?.localOnly && (pages?.images.length ?? 0) === 0) {
+        toast("Choose pages, or summarize the whole PDF", {
           description:
-            "This PDF is too large to attach. Open it, pick a page or page range with \u201cAsk about page\u201d, then send your question.",
+            "This PDF is too large to attach, so it stays on this device. Open it and pick any page range (or a custom list like 1, 3, 5-8) \u2014 or tap \u201cSummarize entire PDF\u201d to process every page in batches.",
         });
         return;
       }
@@ -869,6 +904,15 @@ export default function AshyPage() {
             })()
           : null;
       if (pendingPdf && !pendingPdf.localOnly && !pdf) return; // rejection toast already shown
+      // One question carries at most MAX_IMAGES_TOTAL images — beyond that
+      // the backend trims the OLDEST images mid-turn, which would silently
+      // drop selected pages. Refuse loudly with the two real alternatives.
+      if (images.length > MAX_IMAGES_TOTAL) {
+        toast("That's too many images for one question", {
+          description: `Up to ${MAX_IMAGES_TOTAL} images per question. Select up to ${MAX_SELECTED_PAGES} pages (a range like 5-12), or use \u201cSummarize entire PDF\u201d to process a long document in batches.`,
+        });
+        return;
+      }
       if (!text && images.length === 0 && !pdf) {
         toast("Nothing to send yet", {
           description: "Type a question, or attach an image or PDF first.",
@@ -888,8 +932,8 @@ export default function AshyPage() {
       // honest when the model knows which pages it was actually given.
       const markers: string[] = [];
       if (pdf) markers.push(documentAttachmentMarker(pdf.name));
-      if (pendingPages) {
-        markers.push(pagesAttachmentMarker(pendingPages.label));
+      if (pages) {
+        markers.push(pagesAttachmentMarker(pages.label));
       }
       const outgoingText = markers.length
         ? (text ? `${text}\n\n` : "") + markers.join("\n")
@@ -1019,6 +1063,212 @@ export default function AshyPage() {
     setBusy(false);
     setBusyConvId(null);
   }, []);
+
+  /**
+   * Issue 1 — staged whole-document summary.
+   *
+   * Every page is processed in bounded batches (rendered → sent → released)
+   * so a 100-page PDF never becomes one oversized request or one giant
+   * in-memory render. Section summaries land in the chat in page order,
+   * each citing its own pages; the combined summary is only requested after
+   * EVERY batch succeeded — so the final reply can never claim a full-
+   * document analysis it didn't do. Stop works between batches (the request
+   * id check), and a failed batch stops the run with honest copy about what
+   * was and wasn't processed.
+   */
+  const runPdfSummary = useCallback(
+    async (info: { src: string; name: string; numPages: number }) => {
+      if (busy || readOnly) return;
+      const batches = pageRangeBatches(info.numPages);
+      if (batches.length === 0) return;
+      const myRequest = requestIdRef.current + 1;
+      requestIdRef.current = myRequest;
+      setBusy(true);
+      setSmartDismissedFor(null);
+      toast("Summarizing the whole PDF", {
+        description: `${info.numPages} pages in ${batches.length} batches of up to ${PDF_SUMMARY_BATCH_SIZE} — section summaries first, then one combined summary.`,
+      });
+      let conversationId: ConvId | null = null;
+      try {
+        conversationId = activeId;
+        if (!conversationId) {
+          conversationId = await createConversationMut({
+            projectId: openProjectId ? asProjId(openProjectId) : undefined,
+          });
+          void applyActiveId(conversationId);
+        }
+        setBusyConvId(conversationId);
+
+        let completed = 0;
+        let failed = false;
+        for (let i = 0; i < batches.length; i += 1) {
+          if (requestIdRef.current !== myRequest) return; // stopped
+          const batch = batches[i];
+          const pages = rangeToPages(batch);
+          const section = i + 1;
+          setSummaryStage(
+            `Reading pages ${batch.from}–${batch.to} (batch ${section} of ${batches.length})…`,
+          );
+          let images: Array<{ mimeType: string; data: string }>;
+          try {
+            images = await renderPdfPageBatch(info.src, pages, (done, total) =>
+              setSummaryStage(
+                `Reading pages ${batch.from}–${batch.to} — ${done}/${total} (batch ${section} of ${batches.length})…`,
+              ),
+            );
+          } catch {
+            failed = true;
+            toast("Couldn't read that PDF", {
+              description: `Pages ${batch.from}–${batch.to} could not be rendered. Try opening the document again, or ask about a smaller range.`,
+            });
+            break;
+          }
+          if (requestIdRef.current !== myRequest) return; // stopped
+
+          const label = pageSelectionLabel(pages, info.name);
+          const text =
+            batchSummaryPrompt(
+              {
+                index: section,
+                total: batches.length,
+                from: batch.from,
+                to: batch.to,
+              },
+              info.name,
+            ) +
+            "\n\n" +
+            pagesAttachmentMarker(label);
+          const userMessage: AshyMessage = {
+            id: newId(),
+            role: "user",
+            text,
+            images,
+          };
+          addPending(conversationId, userMessage);
+          lastSendRef.current = {
+            conversationId,
+            clientMessageId: userMessage.id,
+            text,
+            images,
+            pdf: null,
+            requestKind: "ask",
+            contextPdfStorageId: null,
+          };
+          setSummaryStage(
+            `Summarizing pages ${batch.from}–${batch.to} (batch ${section} of ${batches.length})…`,
+          );
+          try {
+            const ok = await runRequest(
+              {
+                conversationId,
+                clientMessageId: userMessage.id,
+                text,
+                images,
+                mode: "send",
+              },
+              myRequest,
+            );
+            if (requestIdRef.current !== myRequest) return;
+            if (ok === false) {
+              failed = true;
+              break;
+            }
+          } catch {
+            if (requestIdRef.current !== myRequest) return;
+            addPending(conversationId, {
+              id: newId(),
+              role: "assistant",
+              text: "",
+              error: "unavailable",
+            });
+            failed = true;
+            break;
+          }
+          completed += 1;
+        }
+        if (requestIdRef.current !== myRequest) return;
+
+        if (failed) {
+          const next = batches[completed];
+          const doneSoFar =
+            completed > 0
+              ? `Section summaries for pages 1–${batches[completed - 1].to} are in the chat. `
+              : "";
+          toast("Summary paused — the document was not fully processed", {
+            description: next
+              ? `${doneSoFar}Pages ${next.from}–${next.to} failed, so NO combined summary was written. Run “Summarize entire PDF” again to continue from this batch, or select a range like ${next.from}-${next.to} to ask about it directly.`
+              : `${doneSoFar}Try again, or select a range to ask about instead.`,
+          });
+          return;
+        }
+
+        // Every page processed → the honest final combine step.
+        const finalText = finalSummaryPrompt(info.name, info.numPages, batches);
+        const finalMessage: AshyMessage = {
+          id: newId(),
+          role: "user",
+          text: finalText,
+        };
+        addPending(conversationId, finalMessage);
+        lastSendRef.current = {
+          conversationId,
+          clientMessageId: finalMessage.id,
+          text: finalText,
+          images: null,
+          pdf: null,
+          requestKind: "ask",
+          contextPdfStorageId: null,
+        };
+        setSummaryStage("Combining the section summaries…");
+        const ok = await runRequest(
+          {
+            conversationId,
+            clientMessageId: finalMessage.id,
+            text: finalText,
+            mode: "send",
+          },
+          myRequest,
+        );
+        if (requestIdRef.current !== myRequest) return;
+        if (ok !== false) {
+          toast("Full summary ready", {
+            description: `All ${info.numPages} pages of ${info.name} were processed in order — the section summaries and the combined summary are in the chat.`,
+          });
+        }
+      } catch {
+        if (requestIdRef.current !== myRequest) return;
+        console.error("[ashy] pdf summary failed kind=network");
+        if (conversationId) {
+          addPending(conversationId, {
+            id: newId(),
+            role: "assistant",
+            text: "",
+            error: "unavailable",
+          });
+        } else {
+          toast("Couldn't start the summary", {
+            description: "Check your connection and try again.",
+          });
+        }
+      } finally {
+        if (requestIdRef.current === myRequest) {
+          setBusy(false);
+          setBusyConvId(null);
+          setSummaryStage(null);
+        }
+      }
+    },
+    [
+      busy,
+      readOnly,
+      activeId,
+      openProjectId,
+      createConversationMut,
+      applyActiveId,
+      addPending,
+      runRequest,
+    ],
+  );
 
   /** Retry after a failed send: same clientMessageId, so it never duplicates. */
   const retryLastSend = useCallback(async () => {
@@ -1903,6 +2153,13 @@ export default function AshyPage() {
                               </div>
                             ) : null}
 
+                            {/* Phase 4 (lab): app-owned interactive tool,
+                                rendered only from a validated spec — the
+                                lab always wins over a graph visual. */}
+                            {message.role === "assistant" && message.lab ? (
+                              <LabPanel lab={message.lab} />
+                            ) : null}
+
                             {/* Phase 3 (math): app-owned interactive visual,
                                 rendered only from a validated spec. */}
                             {message.role === "assistant" && message.explore ? (
@@ -2070,7 +2327,10 @@ export default function AshyPage() {
                 })}
 
                 {busyForActive ? (
-                  <ThinkingIndicator searching={searchMode !== "off"} />
+                  <ThinkingIndicator
+                    searching={searchMode !== "off"}
+                    stage={summaryStage}
+                  />
                 ) : null}
 
                 {/* Smart follow-ups after a fresh answer (dismissible). */}
@@ -2687,12 +2947,40 @@ export default function AshyPage() {
           size={pdfViewer.size}
           readOnly={readOnly}
           onClose={() => setPdfViewer(null)}
-          onAskPages={(pageImages, label) => {
+          onAskPages={(pageImages, label, suggestedText) => {
             setPendingPages({ label, images: pageImages });
             setPdfViewer(null);
+            if (suggestedText) {
+              // Quick action ("Explain pages 5–12"): the ready-to-send draft
+              // goes out immediately with these exact pages; sendMessage
+              // clears the pending selection as part of the send. If Ashy is
+              // mid-answer, keep the draft + pages so nothing is lost.
+              if (busy) {
+                setDraft(suggestedText);
+                toast("Pages attached", {
+                  description: `${label} — press Send when Ashy finishes this answer.`,
+                });
+              } else {
+                void sendMessage(suggestedText, "ask", undefined, {
+                  label,
+                  images: pageImages,
+                });
+              }
+              return;
+            }
             toast("Pages attached", {
               description: `${label} — type your question and send.`,
             });
+          }}
+          onSummarizeAll={(info) => {
+            if (busy) {
+              toast("Ashy is answering something else", {
+                description: "Wait for the current answer, then start the whole-PDF summary.",
+              });
+              return;
+            }
+            setPdfViewer(null);
+            void runPdfSummary(info);
           }}
         />
       ) : null}

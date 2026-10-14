@@ -39,12 +39,14 @@ import type { Id } from "./_generated/dataModel";
 import { action } from "./_generated/server";
 import {
   MATH_VISUALIZATION_INSTRUCTION,
+  LAB_TOOL_INSTRUCTION,
   buildProgressSummary,
-  extractExploreMarker,
   extractVideoQueries,
   formatIsoDuration,
+  resolveReplyVisuals,
   type ExploreSpec,
   type GroundedSource,
+  type LabSpec,
   parseGroundingMetadata,
   VIDEO_ID_PATTERN,
   type VideoResult,
@@ -135,7 +137,7 @@ const FAILURE_MESSAGES: Record<FailureKind, string> = {
   encryptedPdf:
     "That PDF is password-protected. Remove the password (re-export it without one) and upload it again.",
   pdfTooManyPages:
-    "That PDF has more than 80 pages, so it can't be sent whole. Ashy can still open it as a read-only copy so you can ask about a page range at a time.",
+    "That PDF has more than 80 pages, so it can't be sent whole. Open it as a read-only copy instead: select any page range to ask about, or run \"Summarize entire PDF\" to process it in batches.",
   readOnly:
     "Viewing another student's account — Ashy is read-only right now.",
 };
@@ -172,6 +174,8 @@ type Result =
       planMissions?: { itemIds: string[]; labels: string[] };
       /** Phase 3 (math): one validated interactive-visual spec. */
       explore?: ExploreSpec;
+      /** Phase 4 (lab): one validated interactive lab-tool spec. */
+      lab?: LabSpec;
     }
   | { ok: false; kind: FailureKind; message: string };
 
@@ -966,6 +970,11 @@ export const chat = action({
     }
     // Interactive-visual markers (opt-in; malformed markers are dropped).
     systemParts.push(MATH_VISUALIZATION_INSTRUCTION);
+    // Interactive lab tools (opt-in): motion/projectile sims, equation
+    // balancer, chemistry calculators, molecule viewer. Without this the
+    // model never learns the [[lab: …]] marker exists, so simulation
+    // requests fall back to the graph visual above.
+    systemParts.push(LAB_TOOL_INSTRUCTION);
     if (transcribing) {
       // Handwritten-note mode: the transcription rules replace normal
       // answering behaviour for this single request only.
@@ -1292,18 +1301,24 @@ export const chat = action({
       ok: true,
       text: clean || rawText,
     };
-    // Phase 3 (math): [[explore: …]] markers — structured, validated
-    // parameters only. Stripped from the visible text either way; attached
-    // to the result only when they passed validation (and never on plan or
-    // transcription replies).
-    const explored = extractExploreMarker(result.text);
+    // Interactive markers — [[lab: …]] (Phase 4) and [[explore: …]]
+    // (Phase 3): structured, validated parameters only. Both are stripped
+    // from the visible text either way; specs attach only when they passed
+    // validation, never on plan or transcription replies. Policy (lab marker
+    // > deterministic intent fallback > explore graph) lives in one pure,
+    // tested function — a simulation request can never degrade into a
+    // generic graph just because the model forgot its marker.
+    const visuals = resolveReplyVisuals({
+      text: result.text,
+      allow: !transcribing && !planningReply,
+      userText: latestUserText,
+    });
     // Always the stripped text — never fall back to a copy that still
-    // contains the marker (a marker-only reply yields an empty string,
+    // contains a marker (a marker-only reply yields an empty string,
     // which is preferable to showing raw marker syntax to a student).
-    result.text = explored.clean;
-    if (explored.explore && !transcribing && !planningReply) {
-      result.explore = explored.explore;
-    }
+    result.text = visuals.clean;
+    if (visuals.lab) result.lab = visuals.lab;
+    else if (visuals.explore) result.explore = visuals.explore;
     if (result.ok) {
       if (videos.length > 0) result.videos = videos.slice(0, MAX_VIDEOS);
       if (videoSearch) result.videoSearch = videoSearch;

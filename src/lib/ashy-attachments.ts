@@ -78,8 +78,22 @@ export const MAX_PDF_CHARS = 8_000_000;
  */
 export const MAX_PDF_PAGES = 80;
 
-/** Largest page range that can be rendered to images for one question. */
-export const MAX_SELECTED_PAGES = 6;
+/**
+ * Largest page selection that can ride ONE question. Tied to
+ * MAX_IMAGES_TOTAL (8): selected pages are rendered as images and the chat
+ * action's multimodal budget spends at most 8 images per request (newest
+ * turn first), so a selection up to 8 is delivered whole — anything larger
+ * would be silently trimmed mid-turn. Whole-document questions bypass this
+ * entirely: they run through the batched summary flow instead.
+ */
+export const MAX_SELECTED_PAGES = 8;
+
+/**
+ * Pages per batch in the staged "Summarize entire PDF" flow — one bounded
+ * request per batch (never the whole document in one oversized call),
+ * section summaries combined only after every batch succeeded.
+ */
+export const PDF_SUMMARY_BATCH_SIZE = MAX_SELECTED_PAGES;
 
 /** Conservative per-message cap on PDF attachments. */
 export const MAX_PDFS_PER_MESSAGE = 1;
@@ -313,7 +327,7 @@ export const PDF_REJECTION_COPY: Record<PdfRejectionReason, string> = {
   encrypted:
     "That PDF is password-protected. Remove the password (re-export it without one) and upload it again.",
   tooManyPages:
-    "That PDF has more than 80 pages, so it can't be sent whole. Ashy can still open it as a read-only copy so you can ask about a page range at a time.",
+    "That PDF has more than 80 pages, so it can't be sent whole. Open it as a read-only copy instead: select any page range to ask about, or run \"Summarize entire PDF\" to process it in batches.",
 };
 
 /**
@@ -323,7 +337,7 @@ export const PDF_REJECTION_COPY: Record<PdfRejectionReason, string> = {
  */
 export const PDF_LOCAL_ONLY_NOTICE = {
   title: "Opened as a read-only copy",
-  body: `This PDF is too large to attach, so it isn't uploaded. You can still read it here and ask Ashy about up to ${MAX_SELECTED_PAGES} pages at a time — Ashy reads exactly the pages you select.`,
+  body: `This PDF is too large to attach, so it isn't uploaded. You can still read it here and ask Ashy about any page range — up to ${MAX_SELECTED_PAGES} pages per question — or use \u201cSummarize entire PDF\u201d to process the whole document in batches. Ashy reads exactly the pages you select.`,
 } as const;
 
 function bytesIndexOf(
@@ -507,4 +521,218 @@ export function clampPageRange(
   const hi = Math.max(start, end);
   if (hi - lo + 1 > maxPages) return null; // caller shows the limit
   return { from: lo, to: hi };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Page selection — parsing, validation, labels, batching (Issue 1)            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Result of parsing a student's page selection. Errors are student-facing
+ * copy: every rejection names the problem AND the valid form, so nobody is
+ * ever told to fall back to a single page only.
+ */
+export type PageSelection =
+  | { ok: true; pages: number[] }
+  | { ok: false; error: string };
+
+const PAGE_SINGLE = /^(\d+)$/;
+const PAGE_RANGE = /^(\d+)\s*[-\u2013\u2014]\s*(\d+)$/;
+
+function beyondCopy(totalPages: number, page: number): string {
+  return `Page ${page} is beyond this document \u2014 it has ${totalPages} ${
+    totalPages === 1 ? "page" : "pages"
+  }.`;
+}
+
+/**
+ * Parses "7", "5-12", "5\u201312" or a list like "1, 3, 5-8" into an ordered,
+ * de-duplicated page list. Rejects (with clear copy): page 0 / below 1,
+ * reversed ranges, pages beyond the document's total, non-page text, and
+ * selections larger than MAX_SELECTED_PAGES (the error offers both
+ * alternatives: a smaller range, or the batched whole-document summary).
+ */
+export function parsePageSelection(
+  input: string,
+  totalPages: number,
+): PageSelection {
+  if (!Number.isFinite(totalPages) || totalPages < 1) {
+    return {
+      ok: false,
+      error: "The page count for this document isn't known yet \u2014 wait for it to finish opening.",
+    };
+  }
+  const raw = input.trim();
+  if (raw.length === 0) {
+    return {
+      ok: false,
+      error: "Enter a page or a range \u2014 for example 7, 5-12, or 1, 3, 5-8.",
+    };
+  }
+
+  const pages = new Set<number>();
+  for (const piece of raw.split(",")) {
+    const token = piece.trim();
+    if (token.length === 0) {
+      return {
+        ok: false,
+        error: "Empty entry in your list \u2014 separate pages with commas, e.g. 1, 3, 5-8.",
+      };
+    }
+
+    const range = PAGE_RANGE.exec(token);
+    if (range) {
+      const from = Number(range[1]);
+      const to = Number(range[2]);
+      for (const endpoint of [from, to]) {
+        if (endpoint < 1) {
+          return {
+            ok: false,
+            error: `Page ${endpoint} doesn't exist \u2014 pages start at 1.`,
+          };
+        }
+        if (endpoint > totalPages) {
+          return { ok: false, error: beyondCopy(totalPages, endpoint) };
+        }
+      }
+      if (from > to) {
+        return {
+          ok: false,
+          error: `Pages ${from}\u2013${to} run backwards \u2014 enter the range in order, e.g. ${to}\u2013${from}.`,
+        };
+      }
+      for (let page = from; page <= to; page += 1) pages.add(page);
+      continue;
+    }
+
+    const single = PAGE_SINGLE.exec(token);
+    if (!single) {
+      const shown = token.slice(0, 24);
+      return {
+        ok: false,
+        error: `\u201c${shown}\u201d isn't a page number \u2014 use a page like 7, a range like 5-12, or a list like 1, 3, 5-8.`,
+      };
+    }
+    const page = Number(single[1]);
+    if (page < 1) {
+      return { ok: false, error: `Page ${page} doesn't exist \u2014 pages start at 1.` };
+    }
+    if (page > totalPages) {
+      return { ok: false, error: beyondCopy(totalPages, page) };
+    }
+    pages.add(page);
+  }
+
+  const sorted = [...pages].sort((a, b) => a - b);
+  if (sorted.length === 0) {
+    return { ok: false, error: "Select at least one page." };
+  }
+  if (sorted.length > MAX_SELECTED_PAGES) {
+    return {
+      ok: false,
+      error:
+        `That's ${sorted.length} pages \u2014 one question can carry at most ${MAX_SELECTED_PAGES} pages. ` +
+        `Explain up to ${MAX_SELECTED_PAGES} pages at a time (a range like 5-12), ` +
+        `or use \u201cSummarize entire PDF\u201d to process every page in batches.`,
+    };
+  }
+  return { ok: true, pages: sorted };
+}
+
+/** Expands a contiguous range into its page list (batch → images). */
+export function rangeToPages(range: { from: number; to: number }): number[] {
+  const pages: number[] = [];
+  for (let page = range.from; page <= range.to; page += 1) pages.push(page);
+  return pages;
+}
+
+/**
+ * Chat-bubble / marker label for a selection, in document order:
+ * "Page 3 of notes.pdf", "Pages 5\u201212 of notes.pdf",
+ * "Pages 1, 3, 5\u20128 of notes.pdf".
+ */
+export function pageSelectionLabel(
+  pages: readonly number[],
+  name: string,
+): string {
+  const doc = sanitizePdfName(name);
+  if (pages.length === 0) return `Selected pages of ${doc}`;
+  if (pages.length === 1) return `Page ${pages[0]} of ${doc}`;
+  const runs: string[] = [];
+  let start = pages[0];
+  let prev = pages[0];
+  for (let i = 1; i <= pages.length; i += 1) {
+    const current = pages[i];
+    if (current !== undefined && current === prev + 1) {
+      prev = current;
+      continue;
+    }
+    runs.push(start === prev ? String(start) : `${start}\u2013${prev}`);
+    if (current === undefined) break;
+    start = current;
+    prev = current;
+  }
+  return `Pages ${runs.join(", ")} of ${doc}`;
+}
+
+/**
+ * The bounded batch plan for a whole-document summary: contiguous ranges in
+ * page order, each at most PDF_SUMMARY_BATCH_SIZE pages, covering every page
+ * exactly once (asserted by the tests: the flattened plan of a 100-page PDF
+ * is 1..100 with no gap and no overlap).
+ */
+export function pageRangeBatches(
+  totalPages: number,
+  batchSize: number = PDF_SUMMARY_BATCH_SIZE,
+): Array<{ from: number; to: number }> {
+  const batches: Array<{ from: number; to: number }> = [];
+  if (!Number.isFinite(totalPages) || totalPages < 1) return batches;
+  const size = Math.max(1, Math.floor(batchSize));
+  for (let from = 1; from <= totalPages; from += size) {
+    batches.push({ from, to: Math.min(totalPages, from + size - 1) });
+  }
+  return batches;
+}
+
+/**
+ * The instruction sent for ONE batch of a staged whole-document summary.
+ * Bounded on purpose: it names the batch's own pages, forbids content from
+ * outside them, and demands page citations — which is what makes the final
+ * combined summary honest (every page was actually processed, in order).
+ */
+export function batchSummaryPrompt(
+  batch: { index: number; total: number; from: number; to: number },
+  name: string,
+): string {
+  const doc = sanitizePdfName(name);
+  return (
+    `Section ${batch.index} of ${batch.total} \u2014 summarize pages ${batch.from}\u2013${batch.to} of ${doc}. ` +
+    `ONLY these pages are attached as images, already in page order. ` +
+    `Write a concise section summary of what those pages actually say, keep the points in page order, ` +
+    `and cite the page number for every point (for example \u201cpage ${batch.from}\u201d) using the numbers on the attached pages. ` +
+    `Do not summarize, mention or invent anything from a page outside ${batch.from}\u2013${batch.to}.`
+  );
+}
+
+/**
+ * The instruction for the FINAL combine step — only ever sent after every
+ * batch has been processed. It keeps the section order and page references,
+ * requires an explicit "Pages covered" line, and forbids adding content that
+ * was never in a section summary, so the reply can't claim a full-document
+ * analysis it didn't do.
+ */
+export function finalSummaryPrompt(
+  name: string,
+  totalPages: number,
+  batches: ReadonlyArray<{ from: number; to: number }>,
+): string {
+  const doc = sanitizePdfName(name);
+  const sections = batches.map((batch) => `${batch.from}\u2013${batch.to}`).join(", ");
+  return (
+    `Every page of ${doc} has now been summarized above in ${batches.length} ordered batches (pages ${sections}). ` +
+    `Combine those section summaries into one final summary of the whole document: keep the section order, ` +
+    `keep every page reference, and end with a line \u201cPages covered: 1\u2013${totalPages}\u201d. ` +
+    `Only include content that appeared in the section summaries above \u2014 do not add anything new, ` +
+    `and do not skip any section.`
+  );
 }

@@ -32,9 +32,10 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import {
-  MAX_SELECTED_PAGES,
-  clampPageRange,
   formatFileSize,
+  pageSelectionLabel,
+  parsePageSelection,
+  type PageSelection,
 } from "@/lib/ashy-attachments";
 
 /** Target render width for "ask about pages" images — crisp but bounded. */
@@ -59,6 +60,59 @@ function loadPdfjs(): Promise<PdfjsModule> {
   return pdfjsPromise;
 }
 
+/** Renders ONE page to a JPEG data URL at ask-resolution. Shared by the
+ *  dialog's own "explain" flow and the module-level batch renderer below. */
+async function renderPageToJpeg(doc: PdfDoc, pageNumber: number): Promise<string> {
+  const pdfPage = await doc.getPage(pageNumber);
+  const base = pdfPage.getViewport({ scale: 1 });
+  const scale = Math.min(2, ASK_RENDER_WIDTH / base.width);
+  const viewport = pdfPage.getViewport({ scale });
+  const canvas = window.document.createElement("canvas");
+  canvas.width = Math.floor(viewport.width);
+  canvas.height = Math.floor(viewport.height);
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("canvas unavailable");
+  const task = pdfPage.render({
+    canvasContext: context,
+    viewport,
+    canvas,
+  } as Parameters<typeof pdfPage.render>[0]);
+  await task.promise;
+  return canvas.toDataURL("image/jpeg", ASK_JPEG_QUALITY);
+}
+
+/**
+ * Renders a page selection to base64 JPEGs with its OWN document instance —
+ * used by Ashy's staged "Summarize entire PDF" flow, which runs after the
+ * viewer has closed. One batch is rendered, sent and released before the
+ * next, so even a 100-page document never sits in memory at once.
+ */
+export async function renderPdfPageBatch(
+  src: string,
+  pages: readonly number[],
+  onProgress?: (done: number, total: number) => void,
+): Promise<Array<{ mimeType: string; data: string }>> {
+  const pdfjs = await loadPdfjs();
+  const task = pdfjs.getDocument({ url: src });
+  try {
+    const doc = await task.promise;
+    const images: Array<{ mimeType: string; data: string }> = [];
+    const total = pages.length;
+    for (let i = 0; i < total; i += 1) {
+      const dataUrl = await renderPageToJpeg(doc, pages[i]);
+      images.push({
+        mimeType: "image/jpeg",
+        data: dataUrl.slice(dataUrl.indexOf(",") + 1),
+      });
+      onProgress?.(i + 1, total);
+    }
+    return images;
+  } finally {
+    // pdfjs v6: destroying the loading task destroys the document too.
+    void task.destroy().catch(() => undefined);
+  }
+}
+
 export interface PdfViewerProps {
   open: boolean;
   /** A data: URL (local draft) or a signed storage URL (saved message). */
@@ -67,10 +121,18 @@ export interface PdfViewerProps {
   size?: number;
   onClose: () => void;
   /**
-   * Called with rendered JPEG images for the selected page/range. The page
-   * range is already clamped and each image is under the image size cap.
+   * Called with rendered JPEG images for the selection. The pages are
+   * already validated (page order, within the document, within the per-
+   * question cap) and each image is under the image size cap. The optional
+   * suggested text is ready-to-send draft copy (quick actions like
+   * "Explain pages 5–12"); when present, the caller sends it right away.
    */
-  onAskPages: (images: string[], label: string) => void;
+  onAskPages: (images: string[], label: string, suggestedText?: string) => void;
+  /**
+   * "Summarize entire PDF" — the caller processes EVERY page in bounded
+   * batches (staged section summaries, then one combined summary).
+   */
+  onSummarizeAll?: (info: { src: string; name: string; numPages: number }) => void;
   readOnly?: boolean;
 }
 
@@ -81,6 +143,7 @@ export function PdfViewer({
   size,
   onClose,
   onAskPages,
+  onSummarizeAll,
   readOnly = false,
 }: PdfViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -99,8 +162,12 @@ export function PdfViewer({
   const [error, setError] = useState("");
   /** Real progress while rendering selected pages for a question. */
   const [asking, setAsking] = useState<string | null>(null);
+  /** Which selection input is showing: a contiguous range or a custom list. */
+  const [mode, setMode] = useState<"range" | "list">("range");
   const [rangeFrom, setRangeFrom] = useState("");
   const [rangeTo, setRangeTo] = useState("");
+  /** Custom selection, e.g. "1, 3, 5-8". */
+  const [listInput, setListInput] = useState("");
 
   /* --- document lifecycle ------------------------------------------------ */
 
@@ -208,68 +275,66 @@ export function PdfViewer({
     [numPages],
   );
 
-  /** Renders pages [from..to] to JPEG data URLs for the question flow. */
+  /** Renders the selected pages to JPEG data URLs for the question flow. */
   const renderPages = useCallback(
-    async (from: number, to: number): Promise<string[]> => {
+    async (pages: readonly number[]): Promise<string[]> => {
       const doc = docRef.current;
       if (!doc) throw new Error("no document");
-      const pdfjs = await loadPdfjs();
       const images: string[] = [];
-      for (let number = from; number <= to; number += 1) {
-        setAsking(`Reading pages… ${number - from + 1}/${to - from + 1}`);
-        const pdfPage = await doc.getPage(number);
-        const base = pdfPage.getViewport({ scale: 1 });
-        const scale = Math.min(2, ASK_RENDER_WIDTH / base.width);
-        const viewport = pdfPage.getViewport({ scale });
-        const canvas = window.document.createElement("canvas");
-        canvas.width = Math.floor(viewport.width);
-        canvas.height = Math.floor(viewport.height);
-        const context = canvas.getContext("2d");
-        if (!context) throw new Error("canvas unavailable");
-        const task = pdfPage.render({
-          canvasContext: context,
-          viewport,
-          canvas,
-        } as Parameters<typeof pdfPage.render>[0]);
-        await task.promise;
-        images.push(canvas.toDataURL("image/jpeg", ASK_JPEG_QUALITY));
-        void pdfjs; // module already loaded; kept for future use
+      for (let i = 0; i < pages.length; i += 1) {
+        setAsking(`Reading pages… ${i + 1}/${pages.length}`);
+        images.push(await renderPageToJpeg(doc, pages[i]));
       }
       return images;
     },
     [],
   );
 
-  const askAboutRange = useCallback(
-    async (from: number, to: number) => {
-      if (readOnly || asking) return;
-      const range = clampPageRange(from, to, Math.max(1, numPages));
-      if (!range) {
-        setError(
-          `Please choose at most ${MAX_SELECTED_PAGES} pages at a time — Ashy reads selected pages so answers stay fast and accurate.`,
-        );
-        return;
-      }
+  const askAboutPages = useCallback(
+    async (pages: readonly number[]) => {
+      if (readOnly || asking || pages.length === 0) return;
       setError("");
       try {
-        const images = await renderPages(range.from, range.to);
-        const label =
-          range.from === range.to
-            ? `Page ${range.from} of ${name}`
-            : `Pages ${range.from}–${range.to} of ${name}`;
-        onAskPages(images, label);
+        const images = await renderPages(pages);
+        const label = pageSelectionLabel(pages, name);
+        // Ready-to-send draft: "Explain page 3 of notes.pdf." /
+        // "Explain pages 5–12 of notes.pdf."
+        const draft = `Explain ${label.charAt(0).toLowerCase()}${label.slice(1)}.`;
+        onAskPages(images, label, draft);
       } catch {
-        setError("Those pages couldn't be rendered. Try a different range.");
+        setError("Those pages couldn't be rendered. Try again or pick different pages.");
       } finally {
         setAsking(null);
       }
     },
-    [readOnly, asking, numPages, name, onAskPages, renderPages],
+    [readOnly, asking, name, onAskPages, renderPages],
   );
 
   const askAboutCurrentPage = useCallback(() => {
-    void askAboutRange(page, page);
-  }, [askAboutRange, page]);
+    void askAboutPages([page]);
+  }, [askAboutPages, page]);
+
+  /**
+   * Live validation of the active selection mode — parsed on every render
+   * so the label (and any rejection copy) updates as the student types.
+   * `error: ""` means nothing entered yet: no label, no complaint.
+   */
+  const selection: PageSelection = (() => {
+    if (mode === "range") {
+      const from = rangeFrom.trim();
+      const to = rangeTo.trim();
+      if (!from && !to) return { ok: false, error: "" };
+      if (!from || !to) {
+        return {
+          ok: false,
+          error: "Enter both a start and an end page — e.g. 5 to 12.",
+        };
+      }
+      return parsePageSelection(`${from}-${to}`, numPages);
+    }
+    if (!listInput.trim()) return { ok: false, error: "" };
+    return parsePageSelection(listInput, numPages);
+  })();
 
   /* --- render ------------------------------------------------------------ */
 
@@ -405,70 +470,143 @@ export function PdfViewer({
               </div>
             </div>
 
-            <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-t pt-2">
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 cursor-pointer gap-1.5 text-xs"
-                disabled={readOnly || asking !== null}
-                title={
-                  readOnly
-                    ? "Read-only while viewing another student's account"
-                    : undefined
-                }
-                onClick={askAboutCurrentPage}
-              >
-                <MessageSquarePlus className="size-3.5" aria-hidden />
-                Ask about page {page}
-              </Button>
-              <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                <span>Pages</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={numPages}
-                  value={rangeFrom}
-                  placeholder="1"
-                  onChange={(event) => setRangeFrom(event.target.value)}
-                  className="h-8 w-14 rounded-md border bg-background px-2 text-center text-sm text-foreground"
-                  aria-label="Range start page"
-                />
-                <span>–</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={numPages}
-                  value={rangeTo}
-                  placeholder={String(numPages)}
-                  onChange={(event) => setRangeTo(event.target.value)}
-                  className="h-8 w-14 rounded-md border bg-background px-2 text-center text-sm text-foreground"
-                  aria-label="Range end page"
-                />
+            {/* Selection + quick actions (Issue 1): total page count, live
+                range label, clear validation, and the three actions — explain
+                this page, explain the selection, summarize in batches. */}
+            <div className="flex shrink-0 flex-col gap-2 border-t pt-2">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-xs font-medium text-muted-foreground">
+                  {numPages} {numPages === 1 ? "page" : "pages"} total
+                </span>
+                <div
+                  className="ml-auto flex items-center gap-0.5 rounded-lg border p-0.5"
+                  role="group"
+                  aria-label="Selection mode"
+                >
+                  <Button
+                    variant={mode === "range" ? "secondary" : "ghost"}
+                    size="sm"
+                    className="h-7 cursor-pointer px-2 text-xs"
+                    aria-pressed={mode === "range"}
+                    onClick={() => setMode("range")}
+                  >
+                    Range
+                  </Button>
+                  <Button
+                    variant={mode === "list" ? "secondary" : "ghost"}
+                    size="sm"
+                    className="h-7 cursor-pointer px-2 text-xs"
+                    aria-pressed={mode === "list"}
+                    onClick={() => setMode("list")}
+                  >
+                    Custom list
+                  </Button>
+                </div>
+                {mode === "range" ? (
+                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <span>Pages</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={numPages}
+                      value={rangeFrom}
+                      placeholder="1"
+                      onChange={(event) => setRangeFrom(event.target.value)}
+                      className="h-8 w-14 rounded-md border bg-background px-2 text-center text-sm text-foreground"
+                      aria-label="Range start page"
+                    />
+                    <span>–</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={numPages}
+                      value={rangeTo}
+                      placeholder={String(numPages)}
+                      onChange={(event) => setRangeTo(event.target.value)}
+                      className="h-8 w-14 rounded-md border bg-background px-2 text-center text-sm text-foreground"
+                      aria-label="Range end page"
+                    />
+                  </div>
+                ) : (
+                  <input
+                    type="text"
+                    value={listInput}
+                    placeholder="1, 3, 5-8"
+                    spellCheck={false}
+                    onChange={(event) => setListInput(event.target.value)}
+                    className="h-8 w-40 rounded-md border bg-background px-2 text-sm text-foreground"
+                    aria-label="Custom page list"
+                  />
+                )}
+              </div>
+
+              {/* Live label of what will be attached, or the rejection copy. */}
+              {selection.ok ? (
+                <p className="text-xs text-foreground">
+                  Selected: {pageSelectionLabel(selection.pages, name)} ·{" "}
+                  {selection.pages.length} of {numPages} pages
+                </p>
+              ) : selection.error ? (
+                <p className="text-xs text-destructive">{selection.error}</p>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Choose a range, or a custom list like 1, 3, 5-8 — the
+                  selection is attached to your question in page order.
+                </p>
+              )}
+
+              <div className="flex flex-wrap items-center gap-1.5">
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-8 cursor-pointer text-xs"
+                  className="h-8 cursor-pointer gap-1.5 text-xs"
                   disabled={readOnly || asking !== null}
-                  onClick={() =>
-                    void askAboutRange(
-                      Number(rangeFrom) || page,
-                      Number(rangeTo) || page,
-                    )
+                  title={
+                    readOnly
+                      ? "Read-only while viewing another student's account"
+                      : undefined
                   }
+                  onClick={askAboutCurrentPage}
                 >
-                  Ask about range
+                  <MessageSquarePlus className="size-3.5" aria-hidden />
+                  Explain this page
                 </Button>
+                <Button
+                  size="sm"
+                  className="h-8 cursor-pointer gap-1.5 text-xs"
+                  disabled={readOnly || asking !== null || !selection.ok}
+                  title={
+                    selection.ok
+                      ? undefined
+                      : selection.error || "Enter a valid page selection first"
+                  }
+                  onClick={() => {
+                    if (selection.ok) void askAboutPages(selection.pages);
+                  }}
+                >
+                  Explain selected pages
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 cursor-pointer gap-1.5 text-xs"
+                  disabled={readOnly || asking !== null || !src || !onSummarizeAll}
+                  title={`All ${numPages} pages, processed in bounded batches: section summaries first, then one combined summary`}
+                  onClick={() => {
+                    if (src && onSummarizeAll) {
+                      onSummarizeAll({ src, name, numPages });
+                    }
+                  }}
+                >
+                  Summarize entire PDF
+                </Button>
+                {asking ? (
+                  <span className="ml-auto inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <Loader2 className="size-3.5 animate-spin" aria-hidden />
+                    {asking}
+                  </span>
+                ) : null}
               </div>
-              {asking ? (
-                <span className="ml-auto inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <Loader2 className="size-3.5 animate-spin" aria-hidden />
-                  {asking}
-                </span>
-              ) : (
-                <span className="ml-auto hidden text-xs text-muted-foreground sm:inline">
-                  Selected pages are attached to your next question
-                </span>
-              )}
             </div>
           </>
         ) : null}
