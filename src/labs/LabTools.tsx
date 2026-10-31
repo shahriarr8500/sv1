@@ -1,15 +1,16 @@
 /**
  * Lab tools host — `/labs/lab-tools`.
  *
- * One page for every Phase 4 lab tool: the six physics simulations, the four
- * chemistry tools and the rotatable 3D molecule viewer. Each tool is an
- * application-owned component over the pure engines in `src/lib/lab/*` —
- * inputs are parsed/validated by that code, and no AI-generated code is ever
- * executed here.
+ * One page for the four-subject learning lab: Mathematics, Physics, Biology
+ * and Chemistry. Every tool is an application-owned component over the pure
+ * engines in `src/lib/lab/*` — inputs are parsed/validated by that code, and
+ * no AI-generated code is ever executed here.
  */
 
 import { useState, type ComponentType } from "react";
+import { MATH_TOOLS } from "@/components/lab/MathTools";
 import { PHYSICS_SIMS } from "@/components/lab/PhysicsSims";
+import { BIO_TOOLS } from "@/components/lab/BiologyTools";
 import { CHEM_TOOLS } from "@/components/lab/ChemTools";
 import { MoleculeViewer } from "@/components/lab/MoleculeViewer";
 
@@ -22,8 +23,18 @@ interface ToolEntry {
 
 const GROUPS: readonly { name: string; blurb: string; entries: readonly ToolEntry[] }[] = [
   {
+    name: "Mathematics",
+    blurb: "Manipulable mathematical objects — drag them and every equation, feature and readout is recomputed exactly.",
+    entries: MATH_TOOLS.map((entry) => ({
+      id: `math-${entry.kind}`,
+      title: entry.title,
+      subtitle: entry.subtitle,
+      Component: entry.Component,
+    })),
+  },
+  {
     name: "Physics",
-    blurb: "Interactive simulations — every frame is a pure function of the controls and the simulation clock.",
+    blurb: "Animated simulations — moving objects in a scene, every frame a pure function of the controls and the simulation clock.",
     entries: PHYSICS_SIMS.map((entry) => ({
       id: `physics-${entry.kind}`,
       title: entry.title,
@@ -32,24 +43,30 @@ const GROUPS: readonly { name: string; blurb: string; entries: readonly ToolEntr
     })),
   },
   {
-    name: "Chemistry",
-    blurb: "Exact calculators — equations, quantities, structures and equilibrium are computed by tested code, not guessed.",
-    entries: CHEM_TOOLS.map((entry) => ({
-      id: `chem-${entry.kind}`,
+    name: "Biology",
+    blurb: "Simplified interactive models of living systems — the assumptions each one makes are stated right in the tool.",
+    entries: BIO_TOOLS.map((entry) => ({
+      id: `bio-${entry.kind}`,
       title: entry.title,
       subtitle: entry.subtitle,
       Component: entry.Component,
     })),
   },
   {
-    name: "Molecules",
-    blurb: "Rotatable 3D models built in code from published structural parameters — bundled, nothing fetched.",
+    name: "Chemistry",
+    blurb: "Exact calculators plus 3D structures — equations, quantities and equilibrium come from tested code, not guesses.",
     entries: [
+      ...CHEM_TOOLS.map((entry) => ({
+        id: `chem-${entry.kind}`,
+        title: entry.title,
+        subtitle: entry.subtitle,
+        Component: entry.Component,
+      })),
       {
         id: "molecules-3d",
         title: "3D molecular viewer",
         subtitle: "Ball-and-stick, stick and space-filling models of small molecules",
-        Component: MoleculeViewer,
+        Component: MoleculeViewer as ComponentType,
       },
     ],
   },
@@ -65,10 +82,10 @@ export default function LabTools() {
   return (
     <div className="space-y-5">
       <p className="rounded-lg border border-dashed bg-muted/30 px-4 py-3 text-xs leading-relaxed text-muted-foreground">
-        Every tool below runs the app&apos;s own deterministic calculators on whatever you type —
-        invalid input is rejected with an explanation, never executed. Each tool also states what
-        its model leaves out, so an educational approximation is never mistaken for a real-world
-        prediction.
+        Four subjects, one lab: drag, press and tune the controls and every number, curve and
+        moving object below is recomputed by the app&apos;s own deterministic code — invalid input is
+        rejected with an explanation, never executed. Each tool also states what its model leaves
+        out, so an educational approximation is never mistaken for a real-world prediction.
       </p>
 
       <div className="space-y-4">

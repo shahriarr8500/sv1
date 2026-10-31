@@ -73,11 +73,28 @@ export function MotionSim() {
   const xValues = position.map((p) => p.y);
   const pad = Math.max(1, (Math.max(...xValues.map(Math.abs)) || 1) * 0.15);
 
+  // Scene geometry: a cart on a track covering the whole sampled range.
+  const scene = { w: 560, h: 140, l: 30, r: 14, t: 26, b: 26 };
+  const sceneMin = Math.min(...xValues) - pad;
+  const sceneMax = Math.max(...xValues) + pad;
+  const sceneSpan = Math.max(sceneMax - sceneMin, 1e-6);
+  const tx = (x: number): number =>
+    scene.l + ((x - sceneMin) / sceneSpan) * (scene.w - scene.l - scene.r);
+  const trackY = scene.h - scene.b;
+  const cartX = tx(Math.min(sceneMax, Math.max(sceneMin, state.x)));
+  const turnX = state.turned && state.turnTime !== null
+    ? tx(Math.min(sceneMax, Math.max(sceneMin, motionAt({ ...input, t: state.turnTime }).x)))
+    : null;
+  // Wheel spokes roll with the distance travelled — visible proof of motion.
+  // (A ~0.3 m wheel: rolling angle = distance / radius.)
+  const rollDeg = ((state.x - x0) / 0.3) * (180 / Math.PI);
+  const arrowLength = state.v * 7;
+
   return (
     <div className="space-y-4">
       <SimTitle
-        title="Motion — position–time & velocity–time graphs"
-        subtitle="Constant acceleration along a straight line. Drag the playhead with Play to watch both graphs fill in."
+        title="Motion — a cart on a track, with position–time & velocity–time graphs"
+        subtitle="Constant acceleration along a straight line. Press Play to move the cart and watch both graphs fill in together."
       />
       <SimLayout
         controls={
@@ -90,11 +107,101 @@ export function MotionSim() {
               playing={clock.playing}
               onToggle={clock.toggle}
               onReset={clock.reset}
+              onStep={() => clock.step(Math.max(0.1, tEnd / 40))}
               hint={`t = ${fmt(clock.t, 2)} s`}
             />
           </>
         }
       >
+        {/* The scene: a cart physically moving along a track. */}
+        <figure className="min-w-0">
+          <svg
+            viewBox={`0 0 ${scene.w} ${scene.h}`}
+            className="h-auto w-full rounded-lg border bg-card"
+            role="img"
+            aria-label={`Cart at position ${fmt(state.x, 2)} metres, velocity ${fmt(state.v, 2)} metres per second at t ${fmt(clock.t, 2)} seconds`}
+          >
+            <defs>
+              <marker id="cart-varrow" viewBox="0 0 10 10" refX={8} refY={5} markerWidth={5} markerHeight={5} orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" className="fill-emerald-500" />
+              </marker>
+            </defs>
+            {/* track */}
+            <line x1={scene.l} y1={trackY} x2={scene.w - scene.r} y2={trackY} className="stroke-border" strokeWidth={2} />
+            {[sceneMin, sceneMin + sceneSpan / 4, sceneMin + sceneSpan / 2, sceneMin + (3 * sceneSpan) / 4, sceneMax].map(
+              (value) => (
+                <g key={`tick-${value}`}>
+                  <line x1={tx(value)} y1={trackY} x2={tx(value)} y2={trackY + 5} className="stroke-border" strokeWidth={1} />
+                  <text x={tx(value)} y={trackY + 17} textAnchor="middle" fontSize={9} className="fill-muted-foreground">
+                    {fmt(value, 1)}
+                  </text>
+                </g>
+              ),
+            )}
+            {/* start and turning-point markers */}
+            <line x1={tx(x0)} y1={scene.t - 8} x2={tx(x0)} y2={trackY} className="stroke-border" strokeDasharray="3 3" strokeWidth={1} />
+            <text x={tx(x0)} y={scene.t - 12} textAnchor="middle" fontSize={9} className="fill-muted-foreground">
+              x₀
+            </text>
+            {turnX !== null ? (
+              <g>
+                <line x1={turnX} y1={scene.t} x2={turnX} y2={trackY} className="stroke-amber-500/70" strokeDasharray="4 3" strokeWidth={1} />
+                <text x={turnX} y={scene.t - 3} textAnchor="middle" fontSize={9} className="fill-amber-600 dark:fill-amber-400">
+                  turn
+                </text>
+              </g>
+            ) : null}
+            {/* velocity arrow above the cart */}
+            {Math.abs(arrowLength) > 2 ? (
+              <>
+                <line
+                  x1={cartX}
+                  y1={trackY - 56}
+                  x2={cartX + arrowLength}
+                  y2={trackY - 56}
+                  className="stroke-emerald-500"
+                  strokeWidth={2.5}
+                  markerEnd="url(#cart-varrow)"
+                />
+                <text
+                  x={cartX + Math.sign(state.v) * 4}
+                  y={trackY - 62}
+                  textAnchor={state.v >= 0 ? "start" : "end"}
+                  fontSize={10}
+                  className="fill-emerald-600 dark:fill-emerald-400"
+                >
+                  v = {fmt(state.v, 1)} m/s
+                </text>
+              </>
+            ) : null}
+            {/* the cart */}
+            <g>
+              <rect x={cartX - 24} y={trackY - 34} width={48} height={22} rx={4} className="fill-primary" />
+              <rect x={cartX - 24} y={trackY - 34} width={48} height={6} rx={3} className="fill-primary/60" />
+              <g transform={`rotate(${rollDeg} ${cartX - 13} ${trackY - 6})`}>
+                <circle cx={cartX - 13} cy={trackY - 6} r={6} className="fill-muted-foreground" />
+                <line x1={cartX - 13} y1={trackY - 12} x2={cartX - 13} y2={trackY} className="stroke-card" strokeWidth={1.5} />
+              </g>
+              <g transform={`rotate(${rollDeg} ${cartX + 13} ${trackY - 6})`}>
+                <circle cx={cartX + 13} cy={trackY - 6} r={6} className="fill-muted-foreground" />
+                <line x1={cartX + 13} y1={trackY - 12} x2={cartX + 13} y2={trackY} className="stroke-card" strokeWidth={1.5} />
+              </g>
+            </g>
+            <text x={4} y={scene.t - 12} fontSize={10} className="fill-muted-foreground">x (m)</text>
+            <text x={scene.w - scene.r} y={scene.t - 12} textAnchor="end" fontSize={10} className="fill-muted-foreground">
+              t = {fmt(clock.t, 2)} s
+            </text>
+          </svg>
+          <figcaption className="mt-1 flex flex-wrap gap-3 text-[11px] text-muted-foreground">
+            <span className="inline-flex items-center gap-1.5">
+              <span className="inline-block size-2 rounded-sm bg-primary" /> cart
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="inline-block h-0.5 w-4 rounded-full bg-emerald-500" /> velocity arrow (points with motion, length ∝ |v|)
+            </span>
+            <span>dashed — start x₀ and turning point</span>
+          </figcaption>
+        </figure>
         <LinePlot
           title="Position–time (x vs t)"
           series={[{ points: position.map((p) => ({ x: p.t, y: p.y })), stroke: "stroke-primary", label: "x(t)" }]}
@@ -156,11 +263,26 @@ export function ProjectileSim() {
   const clock = useSimClock(Math.max(0.1, result.timeOfFlight));
   const flight = { x: result.vx * clock.t, y: result.vy * clock.t - 0.5 * g * clock.t * clock.t };
 
+  // Scene geometry: the ground, the ramp and the flying ball (world units).
+  const scene = { w: 560, h: 210, l: 40, r: 14, t: 16, b: 30 };
+  const sceneXMax = Math.max(result.range, 1) * 1.1;
+  const sceneYMax = Math.max(result.maxHeight, 1) * 1.3;
+  const sx = (x: number): number => scene.l + (x / sceneXMax) * (scene.w - scene.l - scene.r);
+  const sy = (y: number): number =>
+    scene.h - scene.b - (y / sceneYMax) * (scene.h - scene.t - scene.b);
+  const groundY = sy(0);
+  const speedNow = Math.hypot(result.vx, result.vy - g * clock.t);
+  const vxNow = result.vx;
+  const vyNow = result.vy - g * clock.t;
+  const vectorScale = speedNow > 0.01 ? 46 / speedNow : 0;
+  const rampAngle = angleDeg * DEG;
+  const rampLength = 30;
+
   return (
     <div className="space-y-4">
       <SimTitle
         title="Projectile motion"
-        subtitle="Launch angle and speed control the parabola; the marker flies the exact same trajectory the graph plots."
+        subtitle="Launch angle and speed control the parabola; the ball flies the exact same trajectory the graph plots."
       />
       <SimLayout
         controls={
@@ -173,7 +295,13 @@ export function ProjectileSim() {
               options={G_PRESETS.map((preset) => ({ value: preset.value, label: preset.label }))}
               onChange={setGPreset}
             />
-            <SimTransport playing={clock.playing} onToggle={clock.toggle} onReset={clock.reset} hint={`t = ${fmt(clock.t, 2)} s`} />
+            <SimTransport
+              playing={clock.playing}
+              onToggle={clock.toggle}
+              onReset={clock.reset}
+              onStep={() => clock.step(Math.max(0.05, result.timeOfFlight / 40))}
+              hint={`t = ${fmt(clock.t, 2)} s`}
+            />
             <button
               type="button"
               onClick={() => {
@@ -187,6 +315,125 @@ export function ProjectileSim() {
           </>
         }
       >
+        {/* The scene: a ball actually flying over the ground. */}
+        <figure className="min-w-0">
+          <svg
+            viewBox={`0 0 ${scene.w} ${scene.h}`}
+            className="h-auto w-full rounded-lg border bg-card"
+            role="img"
+            aria-label={`Ball at x ${fmt(flight.x, 1)} metres, height ${fmt(Math.max(0, flight.y), 1)} metres at t ${fmt(clock.t, 2)} seconds`}
+          >
+            <defs>
+              <marker id="proj-varrow" viewBox="0 0 10 10" refX={8} refY={5} markerWidth={5} markerHeight={5} orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" className="fill-emerald-500" />
+              </marker>
+            </defs>
+            {/* sky grid */}
+            {[0.25, 0.5, 0.75, 1].map((fraction) => (
+              <line
+                key={`grid-${fraction}`}
+                x1={scene.l}
+                y1={sy(sceneYMax * fraction)}
+                x2={scene.w - scene.r}
+                y2={sy(sceneYMax * fraction)}
+                className="stroke-border/60"
+                strokeWidth={0.5}
+              />
+            ))}
+            {/* ground */}
+            <rect x={0} y={groundY} width={scene.w} height={scene.h - groundY} className="fill-muted/60" />
+            <line x1={0} y1={groundY} x2={scene.w} y2={groundY} className="stroke-border" strokeWidth={1.5} />
+            {/* launch ramp */}
+            <line
+              x1={sx(0)}
+              y1={groundY}
+              x2={sx(0) + rampLength * Math.cos(rampAngle)}
+              y2={groundY - rampLength * Math.sin(rampAngle)}
+              className="stroke-foreground"
+              strokeWidth={3}
+              strokeLinecap="round"
+            />
+            <text
+              x={sx(0) + (rampLength + 10) * Math.cos(rampAngle / 2)}
+              y={groundY - (rampLength + 10) * Math.sin(rampAngle / 2)}
+              fontSize={11}
+              className="fill-foreground"
+            >
+              θ = {angleDeg}°
+            </text>
+            {/* full path (faint) + flown path (solid) */}
+            <path
+              d={trajectory
+                .filter((point) => point.y >= -0.001)
+                .map((point, index) => `${index === 0 ? "M" : "L"}${sx(point.x).toFixed(2)},${sy(Math.max(0, point.y)).toFixed(2)}`)
+                .join(" ")}
+              fill="none"
+              className="stroke-border"
+              strokeWidth={1.5}
+              strokeDasharray="3 4"
+            />
+            <path
+              d={trajectory
+                .filter((point) => point.x <= flight.x + 0.001 && point.y >= -0.001)
+                .map((point, index) => `${index === 0 ? "M" : "L"}${sx(point.x).toFixed(2)},${sy(Math.max(0, point.y)).toFixed(2)}`)
+                .join(" ")}
+              fill="none"
+              className="stroke-primary"
+              strokeWidth={2.5}
+              strokeLinecap="round"
+            />
+            {/* range marker at landing */}
+            <line
+              x1={sx(result.range)}
+              y1={groundY}
+              x2={sx(result.range)}
+              y2={groundY + 6}
+              className="stroke-border"
+              strokeWidth={1.5}
+            />
+            <text x={sx(result.range)} y={groundY + 17} textAnchor="middle" fontSize={10} className="fill-muted-foreground">
+              R = {fmt(result.range, 1)} m
+            </text>
+            {/* height drop-line */}
+            <line
+              x1={sx(flight.x)}
+              y1={sy(Math.max(0, flight.y))}
+              x2={sx(flight.x)}
+              y2={groundY}
+              className="stroke-primary/50"
+              strokeDasharray="3 3"
+              strokeWidth={1}
+            />
+            {/* the flying ball */}
+            <circle cx={sx(flight.x)} cy={sy(Math.max(0, flight.y))} r={8} className="fill-primary" />
+            <ellipse cx={sx(flight.x)} cy={groundY} rx={6} ry={2} className="fill-foreground/25" />
+            {/* velocity vector */}
+            {vectorScale > 0 ? (
+              <line
+                x1={sx(flight.x)}
+                y1={sy(Math.max(0, flight.y))}
+                x2={sx(flight.x) + vxNow * vectorScale}
+                y2={sy(Math.max(0, flight.y)) - vyNow * vectorScale}
+                className="stroke-emerald-500"
+                strokeWidth={2}
+                markerEnd="url(#proj-varrow)"
+              />
+            ) : null}
+            <text x={4} y={scene.t + 4} fontSize={10} className="fill-muted-foreground">y (m)</text>
+            <text x={scene.w - scene.r} y={scene.h - 8} textAnchor="end" fontSize={10} className="fill-muted-foreground">
+              x (m)
+            </text>
+          </svg>
+          <figcaption className="mt-1 flex flex-wrap gap-3 text-[11px] text-muted-foreground">
+            <span className="inline-flex items-center gap-1.5">
+              <span className="inline-block size-2 rounded-full bg-primary" /> ball
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="inline-block h-0.5 w-4 rounded-full bg-emerald-500" /> velocity (vₓ, v_y)
+            </span>
+            <span>dashed — full path ahead</span>
+          </figcaption>
+        </figure>
         <LinePlot
           title="Trajectory (y vs x)"
           series={[

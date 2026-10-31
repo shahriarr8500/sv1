@@ -500,7 +500,9 @@ export type LabSpec =
   | { type: "lewis"; formula: string }
   | { type: "molecule"; target: string }
   | { type: "sim"; kind: LabSimKind }
-  | { type: "equilibrium" };
+  | { type: "equilibrium" }
+  | { type: "quadratic" }
+  | { type: "membrane" };
 
 /** Marker forms the model may emit (at most one per reply):
  *  `[[lab: balance Fe + O2 -> Fe2O3]]`
@@ -509,6 +511,8 @@ export type LabSpec =
  *  `[[lab: molecule water]]`
  *  `[[lab: sim projectile]]`
  *  `[[lab: equilibrium]]`
+ *  `[[lab: quadratic]]`
+ *  `[[lab: membrane]]`
  */
 const LAB_MARKER = /\[\[\s*lab\s*:\s*([^\n]{0,400}?)\]\]/i;
 const LAB_MARKER_GLOBAL = /\s*\[\[\s*lab\s*:\s*[^\n]{0,400}?\]\]/gi;
@@ -522,7 +526,7 @@ const LAB_TARGET_CHARSET = /^[A-Za-z0-9()\- ]+$/;
 /** Parses one `lab:` payload; null when malformed (caller strips it anyway). */
 function parseLabPayload(payload: string): LabSpec | null {
   const text = payload.trim();
-  const match = /^(balance|moles|lewis|molecule|sim|equilibrium)\b\s*([\s\S]*)$/i.exec(text);
+  const match = /^(balance|moles|lewis|molecule|sim|equilibrium|quadratic|membrane)\b\s*([\s\S]*)$/i.exec(text);
   if (!match) return null;
   const tool = (match[1] ?? "").toLowerCase();
   const rest = (match[2] ?? "").trim();
@@ -530,6 +534,12 @@ function parseLabPayload(payload: string): LabSpec | null {
   if (tool === "equilibrium") {
     // No parameters: the tool opens with its defaults and the student sets Kc.
     return rest === "" ? { type: "equilibrium" } : null;
+  }
+
+  if (tool === "quadratic" || tool === "membrane") {
+    // Parameter-free openers: the quadratic explorer and the cell-transport
+    // lab both open on their teaching defaults; the student drives from there.
+    return rest === "" ? { type: tool } : null;
   }
 
   if (tool === "sim") {
@@ -597,14 +607,19 @@ export const LAB_TOOL_INSTRUCTION = `Lab tools (opt-in markers):
   [[lab: molecule <name or formula>]] — a small bundled molecule whose 3D shape helps (water, methane, CO2, …)
   [[lab: sim <motion|projectile|forces|waves|circuits|optics>]] — a physics situation a simulation would clarify
   [[lab: equilibrium]] — a Kc / ICE-table problem
+  [[lab: quadratic]] — an interactive quadratic-functions experiment (drag the vertex, change a, b, c, watch roots/vertex/discriminant update)
+  [[lab: membrane]] — an animated cell-membrane transport simulation (concentrations, permeability, particle movement)
 - Routing (pick exactly one, or none):
   * "interactive motion simulation" / changing velocity, acceleration or time over a run → [[lab: sim motion]]
   * projectile motion with launch speed, angle, trajectory, flight time, maximum height or range → [[lab: sim projectile]]
+  * "help me understand quadratic functions" / experimenting with a parabola — its coefficients, vertex, roots or discriminant → [[lab: quadratic]] (a plain "graph/plot y = x^2" request stays with the [[explore: graph …]] visual)
+  * osmosis / diffusion / membrane transport where changing concentrations or permeability matters → [[lab: membrane]]
   * "balance this equation" / balancing a chemical equation (put the equation itself in the marker) → [[lab: balance <equation>]]
   * molar mass, moles, concentration or dilution calculations → [[lab: moles <formula>]] (put the formula in the marker)
   * "structure of a molecule" / exploring a molecule's 3D shape → [[lab: molecule <name or formula>]]
   * a plain request to graph a mathematical function (e.g. "graph y = x^2") stays with the [[explore: graph …]] visual — never a lab marker
   * a conceptual question ("why", "explain", "describe") with no request for a tool or calculator gets NO marker at all — answer it normally
+  * when NO lab tool covers the request (mitosis, photosynthesis, gas laws, ecosystems, …), say plainly in your reply that the lab has no simulation for it yet — never imply an animation exists that doesn't
 - The app opens its own lab tool from application-owned components; the marker only carries a whitelisted kind plus bounded validated text (equation/formula/molecule name), never code, never a URL.
 - Emit at most ONE marker of any kind per reply (a lab marker OR an explore visual, never both), only when the tool adds real value, and never for general writing, history or coding answers. The written answer must stand alone without the tool. Malformed markers are silently dropped.`;
 
@@ -706,6 +721,31 @@ export function routeLabIntent(text: string): LabSpec | null {
   // "Projectile motion simulation" without the word projectile? Covered by
   // launch/angle above; a projectile request WITHOUT tool intent falls
   // through to null on purpose — that is a conceptual question.
+
+  // --- mathematics: quadratic-function experiments -------------------------
+  // Opens only for an actual experiment request: a plain "graph/plot y = x^2"
+  // stays with the explore graph, and a conceptual question ("explain the
+  // quadratic formula") returns null like every other explanation.
+  const quadraticSubject = /\b(quadratic|parabola)\b/i.test(message);
+  const plainGraphRequest = /\b(graph|plot)\b/i.test(message);
+  const wantsQuadraticExperiment =
+    /\b(experiment\w*|interactive|simulat\w*|manipulat\w*|visuali[sz]e|drag|sliders?|hands[- ]on)\b/i.test(
+      message,
+    ) || /\bhelp me (?:understand|visuali[sz]e|explore|learn)\b/i.test(message);
+  if (quadraticSubject && !plainGraphRequest && wantsQuadraticExperiment) {
+    return { type: "quadratic" };
+  }
+
+  // --- biology: cell-membrane transport ------------------------------------
+  const membraneSubject =
+    /\b(osmosis|diffusion|cell membranes?|membrane transport|semipermeable|selectively permeable|concentration gradients?)\b/i.test(
+      message,
+    );
+  const wantsTransportExperiment =
+    /\b(simulat\w*|interactive|experiment\w*|visuali[sz]e|explore)\b/i.test(message);
+  if (membraneSubject && wantsTransportExperiment) {
+    return { type: "membrane" };
+  }
 
   // --- equation balancing -------------------------------------------------
   const wantsBalance = /\bbalanc\w*\b/i.test(message);

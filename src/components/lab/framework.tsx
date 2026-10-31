@@ -14,7 +14,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { Pause, Play, RotateCcw } from "lucide-react";
+import { Pause, Play, RotateCcw, StepForward } from "lucide-react";
 import { Slider } from "@/components/ui/slider";
 import { cn } from "@/lib/utils";
 
@@ -115,16 +115,19 @@ export function SimSegmented<T extends string>({
   );
 }
 
-/** Play/pause + reset, wired to the simulation clock. */
+/** Play/pause + reset (and an optional single step), wired to the clock. */
 export function SimTransport({
   playing,
   onToggle,
   onReset,
+  onStep,
   hint,
 }: {
   playing: boolean;
   onToggle: () => void;
   onReset: () => void;
+  /** When provided, shows a Step button that advances one fixed tick. */
+  onStep?: () => void;
   hint?: string;
 }) {
   return (
@@ -137,6 +140,16 @@ export function SimTransport({
         {playing ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
         {playing ? "Pause" : "Play"}
       </button>
+      {onStep ? (
+        <button
+          type="button"
+          onClick={onStep}
+          className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+        >
+          <StepForward className="size-3.5" />
+          Step
+        </button>
+      ) : null}
       <button
         type="button"
         onClick={onReset}
@@ -166,6 +179,7 @@ export function useSimClock(tEnd: number): {
   playing: boolean;
   toggle: () => void;
   reset: () => void;
+  step: (dt?: number) => void;
   setPlaying: (playing: boolean) => void;
 } {
   const [t, setT] = useState(0);
@@ -206,7 +220,16 @@ export function useSimClock(tEnd: number): {
     setPlaying(false);
     setT(0);
   }, []);
-  return { t, playing, toggle, reset, setPlaying };
+  // Single fixed tick ("Step") — pauses first so play and step never fight,
+  // and clamps at tEnd instead of wrapping, so a step never hides the result.
+  const step = useCallback(
+    (dt = 0.25) => {
+      setPlaying(false);
+      setT((previous) => Math.min(previous + Math.max(0, dt), tEnd));
+    },
+    [tEnd],
+  );
+  return { t, playing, toggle, reset, step, setPlaying };
 }
 
 /* -------------------------------------------------------------------------- */

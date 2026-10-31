@@ -71,6 +71,10 @@ export function validateLabSpec(lab: AshyLab | undefined | null): AshyLab | null
       return (LAB_SIM_KINDS as readonly string[]).includes(lab.kind) ? lab : null;
     case "equilibrium":
       return { type: "equilibrium" };
+    case "quadratic":
+      return { type: "quadratic" };
+    case "membrane":
+      return { type: "membrane" };
     default:
       return null;
   }
@@ -95,5 +99,9 @@ export function labToolId(lab: AshyLab): string {
       return "chem-equilibrium";
     case "molecule":
       return "molecules-3d";
+    case "quadratic":
+      return "math-quadratic";
+    case "membrane":
+      return "bio-transport";
   }
 }

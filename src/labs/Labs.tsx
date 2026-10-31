@@ -37,7 +37,7 @@ const LABS_INDEX: LabEntry[] = [
     slug: "lab-tools",
     title: "Physics & chemistry lab",
     description:
-      "Six physics simulations, four chemistry calculators and a rotatable 3D molecular viewer — every result computed by the app's own tested code.",
+      "The four-subject learning lab — mathematics, physics, biology and chemistry experiments, every result computed by the app's own tested code.",
     flag: "labTools",
     Component: LabTools,
   },

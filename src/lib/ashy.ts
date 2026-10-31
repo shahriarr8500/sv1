@@ -85,7 +85,7 @@ export type AshyExplore =
   | { type: "graph"; expression: string };
 
 /**
- * One interactive lab-tool spec (Phase 4). Only these six shapes exist —
+ * One interactive lab-tool spec (Phase 4). Only these eight shapes exist —
  * mirrored from the server's LabSpec — and the client re-validates every
  * field (whitelist kind, charset, length, bundled-molecule check) in
  * `validateLabSpec` before any tool renders, so a stored row can never
@@ -106,7 +106,9 @@ export type AshyLab =
         | "circuits"
         | "optics";
     }
-  | { type: "equilibrium" };
+  | { type: "equilibrium" }
+  | { type: "quadratic" }
+  | { type: "membrane" };
 
 /** One real, backend-searched YouTube video. */
 export interface AshyVideo {

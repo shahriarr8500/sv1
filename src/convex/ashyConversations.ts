@@ -719,6 +719,8 @@ export const appendReply = mutation({
           ),
         }),
         v.object({ type: v.literal("equilibrium") }),
+        v.object({ type: v.literal("quadratic") }),
+        v.object({ type: v.literal("membrane") }),
       ),
     ),
   },
