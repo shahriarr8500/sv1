@@ -8,6 +8,7 @@ import { AshyProgressStatsSync } from "@/components/ashy/ProgressStatsSync";
 import { WorkspaceProvider } from "@/state/workspace";
 import { StudyLogProvider } from "@/state/study-log";
 import { TargetsProvider } from "@/state/targets";
+import { DailyTasksProvider } from "@/state/daily-tasks";
 import { GamificationProvider } from "@/state/gamification";
 import { VlyToolbar } from "../vly-toolbar-readonly.tsx";
 import { ConvexAuthProvider } from "@convex-dev/auth/react";
@@ -159,6 +160,7 @@ createRoot(document.getElementById("root")!).render(
             <WorkspaceProvider>
               <StudyLogProvider>
                 <TargetsProvider>
+                  <DailyTasksProvider>
                   <GamificationProvider>
                     <BrowserRouter>
                       <RouteSyncer />
@@ -248,6 +250,7 @@ createRoot(document.getElementById("root")!).render(
                     </BrowserRouter>
                     <Toaster />
                   </GamificationProvider>
+                  </DailyTasksProvider>
                 </TargetsProvider>
               </StudyLogProvider>
             </WorkspaceProvider>

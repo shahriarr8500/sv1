@@ -18,7 +18,8 @@ import { Link } from "react-router";
 import { motion } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { TodayMissions } from "@/components/student-os/TodayMissions";
+import { TodayPlan } from "@/components/student-os/TodayPlan";
+import { MyConsistency } from "@/components/student-os/MyConsistency";
 import { ContinueStudying } from "@/components/student-os/ContinueStudying";
 import { OverallProgressCard } from "@/components/student-os/OverallProgressCard";
 import { RecentProgress } from "@/components/student-os/RecentProgress";
@@ -146,9 +147,10 @@ export default function DashboardPage() {
       {/* 1–2. Greeting, goal, streak, level */}
       <WelcomeHeader />
 
-      {/* 3–4. Today's main mission + progress */}
+      {/* 2. Today's Plan — date navigation, the Daily Success Rate for the
+          day (academic + personal), and both lists for that same date. */}
       <StudentOSTargetsErrorBoundary>
-        <TodayMissions />
+        <TodayPlan />
       </StudentOSTargetsErrorBoundary>
 
       {/* 5. Daily Guidance + AI summary — items-start so neither card is
@@ -216,6 +218,9 @@ export default function DashboardPage() {
           ))}
         </div>
       </section>
+
+      {/* Consistency over time — today, the week, the month, any day. */}
+      <MyConsistency />
 
       {/* Secondary: gamification detail + bookings + recent */}
       <div className="grid gap-4 sm:grid-cols-2">

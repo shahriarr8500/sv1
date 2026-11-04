@@ -273,6 +273,8 @@ const schema = defineSchema(
           ),
         }),
         v.object({ type: v.literal("equilibrium") }),
+        v.object({ type: v.literal("quadratic") }),
+        v.object({ type: v.literal("membrane") }),
       ),
     ),
       /**
@@ -307,6 +309,61 @@ const schema = defineSchema(
       createdAt: v.number(),
       updatedAt: v.number(),
     }).index("by_user", ["userId"]),
+
+    // ------------------------------------------------------------------ //
+    // My Daily Tasks — the personal to-do system that sits beside the
+    // chapter-based missions. Two tables, two jobs: `dailyTasks` is the
+    // *series* (schedule + default content) and `taskOccurrences` is one row
+    // per (task, date) carrying that day's own completion/deletion marks.
+    // Materialising a day is idempotent, so a refresh or a second device can
+    // never duplicate it, and days that already happened are never rewritten.
+    // ------------------------------------------------------------------ //
+    dailyTasks: defineTable({
+      userId: v.id("users"),
+      title: v.string(),
+      /** null = no description (nullable so clearing one really clears it). */
+      description: v.optional(v.union(v.string(), v.null())),
+      priority: v.union(v.literal("low"), v.literal("medium"), v.literal("high")),
+      category: v.string(),
+      /** "HH:mm" local due time, shown as a label — no push notifications. */
+      dueTime: v.optional(v.union(v.string(), v.null())),
+      repeat: v.union(
+        v.literal("none"),
+        v.literal("daily"),
+        v.literal("weekdays"),
+        v.literal("weekly"),
+      ),
+      /** Weekdays (0 = Sunday) — present only when repeat === "weekdays". */
+      weekdays: v.optional(v.union(v.array(v.number()), v.null())),
+      /** First date the series occurs on. */
+      startDate: v.string(),
+      /** Set when the series stops; no occurrence is ever created from here. */
+      archivedAt: v.optional(v.number()),
+      archivedFrom: v.optional(v.string()),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+    }).index("by_user", ["userId"]),
+
+    taskOccurrences: defineTable({
+      userId: v.id("users"),
+      taskId: v.id("dailyTasks"),
+      /** Local calendar date ("YYYY-MM-DD"), never a UTC timestamp. */
+      date: v.string(),
+      /** Content snapshot: a later edit to the series must not rewrite history. */
+      title: v.string(),
+      description: v.optional(v.union(v.string(), v.null())),
+      priority: v.union(v.literal("low"), v.literal("medium"), v.literal("high")),
+      category: v.string(),
+      dueTime: v.optional(v.union(v.string(), v.null())),
+      /** null = not completed that day; set = completed (and when). */
+      completedAt: v.optional(v.union(v.number(), v.null())),
+      /** Set when this single day was deleted; past days stay in history. */
+      deletedAt: v.optional(v.number()),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+    })
+      .index("by_user_date", ["userId", "date"])
+      .index("by_task_date", ["taskId", "date"]),
 
     // tableName: defineTable({
     //   ...

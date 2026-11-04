@@ -5,9 +5,15 @@
  * chapter it belongs to, and one obvious button to start. Everything else
  * (the full list, checking off, XP, perfect-day handling) is unchanged.
  *
- * Each row is a real syllabus item planned for today. Checking one marks the
- * target complete, fills in the syllabus item if it is not already done, and
- * pays out the mission's XP exactly once. Unchecking only undoes the target.
+ * Each row is a real syllabus item planned for the shown date. Checking one
+ * marks the target complete, fills in the syllabus item if it is not already
+ * done, and pays out the mission's XP exactly once. Unchecking only undoes
+ * the target.
+ *
+ * Two presentation modes: the standalone card used by `/missions`, and a
+ * borderless section the Today's Plan card embeds next to My Daily Tasks for
+ * the same date. XP, streak and study-time notes are "today" facts, so they
+ * only appear when the shown date really is today.
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -31,17 +37,13 @@ import { AddMissionDialog } from "@/components/student-os/AddMissionDialog";
 import { lookupItem } from "@/lib/student-os/syllabus";
 import { PERFECT_DAY_XP } from "@/lib/student-os/gamification";
 import { chapterLabel, itemLabel } from "@/lib/student-os/format";
+import { formatDateKey, todayKey } from "@/lib/student-os/daily-tasks";
 import { cn } from "@/lib/utils";
 import { useStudentOS } from "@/state/student-os";
 import { useStudyLog } from "@/state/study-log";
 import { useTargets } from "@/state/targets";
 import { useGamification } from "@/state/gamification";
 import { useMissionActions } from "@/state/missions";
-
-function todayKey(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
 
 function isSameLocalDay(timestamp: number, now = new Date()): boolean {
   const then = new Date(timestamp);
@@ -73,14 +75,25 @@ function ashyContextFor(parts: {
   return lines.join("\n");
 }
 
-export function TodayMissions() {
-  const { targets, today } = useTargets();
+export function TodayMissions({
+  dateKey,
+  variant = "card",
+}: {
+  /** Which day's missions to show. Defaults to today. */
+  dateKey?: string;
+  /** `card` = standalone card, `section` = a block inside another card. */
+  variant?: "card" | "section";
+}) {
+  const { targets, plannedFor } = useTargets();
   const { toggleMission, removeMission } = useMissionActions();
   const { xpToday, streak } = useGamification();
   const { log, active, startTimer } = useStudyLog();
   const { completions } = useStudentOS();
   const [dialogOpen, setDialogOpen] = useState(false);
   const navigate = useNavigate();
+
+  const key = dateKey ?? todayKey();
+  const isToday = key === todayKey();
 
   // The welcome header's "Plan today's missions" CTA hands off here so the
   // student never has to hunt for the planner.
@@ -90,20 +103,20 @@ export function TodayMissions() {
     return () => window.removeEventListener("student-os:add-mission", open);
   }, []);
 
-  const key = todayKey();
-  const planned = today.length;
-  const completed = today.filter((t) => t.completed).length;
+  const plannedRows = useMemo(() => plannedFor(key), [plannedFor, key]);
+  const planned = plannedRows.length;
+  const completed = plannedRows.filter((t) => t.completed).length;
   const percent = planned === 0 ? 0 : Math.round((completed / planned) * 100);
 
   const rows = useMemo(
     () =>
-      today
+      plannedRows
         .map((target) => ({
           target,
           location: lookupItem(target.syllabusItemId),
         }))
         .sort((a, b) => Number(a.target.completed) - Number(b.target.completed)),
-    [today],
+    [plannedRows],
   );
 
   /** The one mission worth starting right now (first incomplete row). */
@@ -112,8 +125,7 @@ export function TodayMissions() {
     [rows],
   );
   const nextRow = useMemo(
-    () =>
-      rows.filter((row) => !row.target.completed).slice(1)[0] ?? null,
+    () => rows.filter((row) => !row.target.completed).slice(1)[0] ?? null,
     [rows],
   );
 
@@ -137,12 +149,13 @@ export function TodayMissions() {
     if (next) {
       // One satisfying moment, not two. The celebration already carries the
       // detail and the XP read-out, so a matching toast would just repeat it.
+      // XP and streak are today's story — a past or planned day just confirms.
       const nowCompleted = completed + 1;
       const streakNote =
         streak > 0
           ? `Streak: ${streak} day${streak === 1 ? "" : "s"}`
           : undefined;
-      if (planned > 0 && nowCompleted === planned) {
+      if (isToday && planned > 0 && nowCompleted === planned) {
         celebrate({
           kind: "perfect",
           title: "Perfect day",
@@ -150,7 +163,7 @@ export function TodayMissions() {
           xp: PERFECT_DAY_XP,
           note: streakNote,
         });
-      } else {
+      } else if (isToday) {
         celebrate({
           kind: "target",
           title: "Target complete",
@@ -158,11 +171,17 @@ export function TodayMissions() {
           xp: target.xp,
           note: streakNote,
         });
+      } else {
+        toast("Mission complete", {
+          description: where || target.syllabusItemId,
+        });
       }
     } else {
       // XP is derived from completion, so it drops straight back out.
       toast("Mission reopened", {
-        description: `−${target.xp} XP removed${where ? ` · ${where}` : ""}`,
+        description: isToday
+          ? `−${target.xp} XP removed${where ? ` · ${where}` : ""}`
+          : where || target.syllabusItemId,
       });
     }
   };
@@ -200,289 +219,315 @@ export function TodayMissions() {
   const nextLocation = nextRow?.location ?? null;
   const allDone = planned > 0 && !heroRow;
 
+  const headerBlock = (
+    <>
+      <div className="flex w-full flex-wrap items-start justify-between gap-3">
+        <div className="space-y-1">
+          <CardTitle className="flex items-center gap-2 text-lg">
+            <Target className="size-4 text-primary" aria-hidden />
+            {isToday ? (
+              "Today's Missions"
+            ) : (
+              <>
+                Missions
+                <span className="text-sm font-normal text-muted-foreground">
+                  {formatDateKey(key)}
+                </span>
+              </>
+            )}
+          </CardTitle>
+          <p className="text-sm text-muted-foreground">
+            {planned === 0 ? (
+              isToday
+                ? "Nothing planned yet — set your first mission."
+                : "Nothing planned for this day."
+            ) : (
+              <>
+                <span className="font-semibold text-foreground tabular-nums">
+                  {completed} / {planned}
+                </span>{" "}
+                completed
+                {isToday && xpToday > 0 ? (
+                  <span className="ml-2 font-medium text-primary">
+                    +{xpToday} XP earned
+                  </span>
+                ) : null}
+                {isToday && studiedSeconds > 0 ? (
+                  <span className="ml-2 text-muted-foreground">
+                    {formatDuration(studiedSeconds)} studied today
+                  </span>
+                ) : null}
+              </>
+            )}
+          </p>
+        </div>
+
+        <Button
+          size="sm"
+          className="cursor-pointer"
+          onClick={() => setDialogOpen(true)}
+        >
+          <Plus className="size-4" aria-hidden />
+          Add mission
+        </Button>
+      </div>
+
+      {planned > 0 ? (
+        <div className="space-y-1.5 pt-1">
+          <Progress value={percent} aria-label="Mission progress" />
+          <p className="text-xs text-muted-foreground tabular-nums">
+            {percent}% of {isToday ? "today's" : "this day's"} plan
+          </p>
+        </div>
+      ) : null}
+    </>
+  );
+
+  const heroBlock = heroRow ? (
+    <div className="rounded-xl border border-primary/30 bg-primary/[0.04] p-4 sm:p-5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="flex items-center gap-1.5 text-xs font-semibold tracking-wider text-primary uppercase">
+          <ListChecks className="size-3.5" aria-hidden />
+          {isToday ? "Today's mission" : "Next mission"}
+        </p>
+        {nextLocation ? (
+          <p className="min-w-0 text-xs break-words text-muted-foreground">
+            Next: {nextLocation.subject.name} ·{" "}
+            {chapterLabel(nextLocation.chapter)}
+          </p>
+        ) : null}
+      </div>
+
+      <p className="mt-2.5 text-lg font-semibold tracking-tight sm:text-xl">
+        {heroLocation?.subject.name ?? "Syllabus"}
+      </p>
+      <p className="mt-0.5 text-sm text-muted-foreground">
+        {heroLocation ? chapterLabel(heroLocation.chapter) : ""}
+      </p>
+      <p className="mt-1 text-sm font-medium text-primary">
+        {heroLocation
+          ? itemLabel(heroLocation.item)
+          : heroRow.target.syllabusItemId}
+      </p>
+
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <Button className="cursor-pointer" onClick={handleHeroStart}>
+          <Play className="size-4" aria-hidden />
+          {heroLabel}
+        </Button>
+        <Button variant="outline" className="cursor-pointer" asChild>
+          <Link
+            to={`/ashy?context=${encodeURIComponent(
+              ashyContextFor({
+                subject: heroLocation?.subject.name,
+                chapter: heroLocation
+                  ? chapterLabel(heroLocation.chapter)
+                  : undefined,
+                item: heroLocation ? itemLabel(heroLocation.item) : undefined,
+              }),
+            )}`}
+          >
+            <Sparkles className="size-3.5" aria-hidden />
+            Ask Ashy
+          </Link>
+        </Button>
+      </div>
+    </div>
+  ) : allDone ? (
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-primary/40 bg-primary/10 p-4">
+      <p className="flex items-center gap-2 text-sm font-medium text-primary">
+        <CheckCircle2 className="size-4 shrink-0" aria-hidden />
+        All {planned} mission{planned === 1 ? "" : "s"} complete.
+        Your progress is updated.
+      </p>
+      <Button
+        size="sm"
+        variant="outline"
+        className="cursor-pointer"
+        onClick={() => navigate("/performance")}
+      >
+        View progress
+      </Button>
+    </div>
+  ) : null;
+
+  const listBlock = (
+    <>
+      {rows.length === 0 ? (
+        <div className="rounded-lg border border-dashed px-6 py-10 text-center">
+          <p className="text-sm font-semibold tracking-tight">
+            {isToday ? "Your journey starts today" : "No missions this day"}
+          </p>
+          <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
+            {isToday
+              ? "Set your first mission and start building your streak."
+              : "Plan syllabus work for this day whenever you're ready."}
+          </p>
+          <Button
+            className="mt-4 cursor-pointer"
+            onClick={() => setDialogOpen(true)}
+          >
+            <Plus className="size-4" aria-hidden />
+            {isToday ? "Set today's targets" : "Plan this day"}
+          </Button>
+        </div>
+      ) : (
+        <ul className="space-y-1.5">
+          {rows.map(({ target, location }) => {
+            const done = target.completed;
+            const syllabusDone =
+              typeof completions[target.syllabusItemId] === "number";
+            const studyingHere =
+              active?.syllabusItemId === target.syllabusItemId;
+            const isHero = heroRow?.target.id === target.id;
+            return (
+              <li
+                key={target.id}
+                className={cn(
+                  "group flex items-start gap-3 rounded-lg border px-3 py-2.5 transition-colors",
+                  done
+                    ? "border-primary/30 bg-primary/5"
+                    : isHero
+                      ? "border-primary/30"
+                      : "hover:border-primary/30 hover:bg-accent/40",
+                )}
+              >
+                <Checkbox
+                  className="mt-1"
+                  checked={done}
+                  aria-label={
+                    done ? "Mark mission incomplete" : "Mark mission complete"
+                  }
+                  onCheckedChange={(state) =>
+                    handleToggle(target.id, state === true)
+                  }
+                />
+
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                    <span
+                      className={cn(
+                        "text-xs font-semibold tracking-wider uppercase",
+                        done ? "text-primary" : "text-muted-foreground",
+                      )}
+                    >
+                      {location?.subject.name ?? "Syllabus"}
+                    </span>
+                    {location ? (
+                      <span className="text-xs text-muted-foreground">
+                        {location.chapter.title
+                          ? `Ch ${location.chapter.number} — ${location.chapter.title}`
+                          : `Ch ${location.chapter.number}`}
+                      </span>
+                    ) : null}
+                  </div>
+
+                  <p
+                    className={cn(
+                      "mt-0.5 text-sm font-medium tracking-tight",
+                      done && "text-muted-foreground line-through",
+                    )}
+                  >
+                    {location?.item.title ?? target.syllabusItemId}
+                  </p>
+
+                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                    <span className="font-medium text-primary tabular-nums">
+                      +{target.xp} XP
+                    </span>
+                    {done ? (
+                      <span className="inline-flex items-center gap-1 text-muted-foreground">
+                        <CheckCircle2 className="size-3.5" aria-hidden />
+                        Done
+                      </span>
+                    ) : null}
+                    {syllabusDone && !done ? (
+                      <span className="text-muted-foreground">
+                        Already in syllabus
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+
+                <div className="flex shrink-0 items-center gap-1">
+                  {!done ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 cursor-pointer px-2 text-xs"
+                      disabled={Boolean(active) && !studyingHere}
+                      title={
+                        active && !studyingHere
+                          ? "A timer is already running"
+                          : "Start a study session for this mission"
+                      }
+                      onClick={() => handleStartSession(target.syllabusItemId)}
+                    >
+                      <Play className="size-3" aria-hidden />
+                      {studyingHere ? "Studying" : "Start session"}
+                    </Button>
+                  ) : null}
+                  {!done ? (
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      className="h-7 w-7 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                      aria-label="Remove mission"
+                      title="Remove mission"
+                      onClick={() => removeMission(target.id)}
+                    >
+                      <X className="size-3.5" aria-hidden />
+                    </Button>
+                  ) : null}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      {planned > 0 ? (
+        <div className="flex items-center justify-between pt-2 text-xs text-muted-foreground">
+          <span>
+            {completed} of {planned} planned for {isToday ? "today" : "this day"}
+          </span>
+          <button
+            type="button"
+            className="cursor-pointer font-medium text-primary hover:underline"
+            onClick={() => setDialogOpen(true)}
+          >
+            + Add mission
+          </button>
+        </div>
+      ) : null}
+    </>
+  );
+
+  const dialog = (
+    <AddMissionDialog open={dialogOpen} onOpenChange={setDialogOpen} defaultDate={key} />
+  );
+
+  if (variant === "section") {
+    return (
+      <div className="space-y-3">
+        {headerBlock}
+        {heroBlock ? <div>{heroBlock}</div> : null}
+        <div className="space-y-2">{listBlock}</div>
+        {dialog}
+      </div>
+    );
+  }
+
   return (
     <>
       <Card className="gap-4">
-        <CardHeader className="gap-3">
-          <div className="flex w-full flex-wrap items-start justify-between gap-3">
-            <div className="space-y-1">
-              <CardTitle className="flex items-center gap-2 text-lg">
-                <Target className="size-4 text-primary" aria-hidden />
-                Today&apos;s Missions
-              </CardTitle>
-              <p className="text-sm text-muted-foreground">
-                {planned === 0 ? (
-                  "Nothing planned yet — set your first mission."
-                ) : (
-                  <>
-                    <span className="font-semibold text-foreground tabular-nums">
-                      {completed} / {planned}
-                    </span>{" "}
-                    completed
-                    {xpToday > 0 ? (
-                      <span className="ml-2 font-medium text-primary">
-                        +{xpToday} XP earned
-                      </span>
-                    ) : null}
-                    {studiedSeconds > 0 ? (
-                      <span className="ml-2 text-muted-foreground">
-                        {formatDuration(studiedSeconds)} studied today
-                      </span>
-                    ) : null}
-                  </>
-                )}
-              </p>
-            </div>
-
-            <Button
-              size="sm"
-              className="cursor-pointer"
-              onClick={() => setDialogOpen(true)}
-            >
-              <Plus className="size-4" aria-hidden />
-              Add mission
-            </Button>
-          </div>
-
-          {planned > 0 ? (
-            <div className="space-y-1.5 pt-1">
-              <Progress value={percent} aria-label="Mission progress" />
-              <p className="text-xs text-muted-foreground tabular-nums">
-                {percent}% of today&apos;s plan
-              </p>
-            </div>
-          ) : null}
-        </CardHeader>
-
-        {/* Hero — the one mission worth starting right now. */}
-        {heroRow ? (
-          <CardContent className="pt-0">
-            <div className="rounded-xl border border-primary/30 bg-primary/[0.04] p-4 sm:p-5">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="flex items-center gap-1.5 text-xs font-semibold tracking-wider text-primary uppercase">
-                  <ListChecks className="size-3.5" aria-hidden />
-                  Today&apos;s mission
-                </p>
-                {nextLocation ? (
-                  <p className="min-w-0 text-xs break-words text-muted-foreground">
-                    Next: {nextLocation.subject.name} ·{" "}
-                    {chapterLabel(nextLocation.chapter)}
-                  </p>
-                ) : null}
-              </div>
-
-              <p className="mt-2.5 text-lg font-semibold tracking-tight sm:text-xl">
-                {heroLocation?.subject.name ?? "Syllabus"}
-              </p>
-              <p className="mt-0.5 text-sm text-muted-foreground">
-                {heroLocation ? chapterLabel(heroLocation.chapter) : ""}
-              </p>
-              <p className="mt-1 text-sm font-medium text-primary">
-                {heroLocation
-                  ? itemLabel(heroLocation.item)
-                  : heroRow.target.syllabusItemId}
-              </p>
-
-              <div className="mt-4 flex flex-wrap items-center gap-2">
-                <Button className="cursor-pointer" onClick={handleHeroStart}>
-                  <Play className="size-4" aria-hidden />
-                  {heroLabel}
-                </Button>
-                <Button variant="outline" className="cursor-pointer" asChild>
-                  <Link
-                    to={`/ashy?context=${encodeURIComponent(
-                      ashyContextFor({
-                        subject: heroLocation?.subject.name,
-                        chapter: heroLocation
-                          ? chapterLabel(heroLocation.chapter)
-                          : undefined,
-                        item: heroLocation
-                          ? itemLabel(heroLocation.item)
-                          : undefined,
-                      }),
-                    )}`}
-                  >
-                    <Sparkles className="size-3.5" aria-hidden />
-                    Ask Ashy
-                  </Link>
-                </Button>
-              </div>
-            </div>
-          </CardContent>
-        ) : allDone ? (
-          <CardContent className="pt-0">
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-primary/40 bg-primary/10 p-4">
-              <p className="flex items-center gap-2 text-sm font-medium text-primary">
-                <CheckCircle2 className="size-4 shrink-0" aria-hidden />
-                All {planned} mission{planned === 1 ? "" : "s"} complete.
-                Your progress is updated.
-              </p>
-              <Button
-                size="sm"
-                variant="outline"
-                className="cursor-pointer"
-                onClick={() => navigate("/performance")}
-              >
-                View progress
-              </Button>
-            </div>
-          </CardContent>
+        <CardHeader className="gap-3">{headerBlock}</CardHeader>
+        {heroBlock ? (
+          <CardContent className="pt-0">{heroBlock}</CardContent>
         ) : null}
-
-        <CardContent className="space-y-2">
-          {rows.length === 0 ? (
-            <div className="rounded-lg border border-dashed px-6 py-10 text-center">
-              <p className="text-sm font-semibold tracking-tight">
-                Your journey starts today
-              </p>
-              <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
-                Set your first mission and start building your streak.
-              </p>
-              <Button
-                className="mt-4 cursor-pointer"
-                onClick={() => setDialogOpen(true)}
-              >
-                <Plus className="size-4" aria-hidden />
-                Set today&apos;s targets
-              </Button>
-            </div>
-          ) : (
-            <ul className="space-y-1.5">
-              {rows.map(({ target, location }) => {
-                const done = target.completed;
-                const syllabusDone =
-                  typeof completions[target.syllabusItemId] === "number";
-                const studyingHere =
-                  active?.syllabusItemId === target.syllabusItemId;
-                const isHero = heroRow?.target.id === target.id;
-                return (
-                  <li
-                    key={target.id}
-                    className={cn(
-                      "group flex items-start gap-3 rounded-lg border px-3 py-2.5 transition-colors",
-                      done
-                        ? "border-primary/30 bg-primary/5"
-                        : isHero
-                          ? "border-primary/30"
-                          : "hover:border-primary/30 hover:bg-accent/40",
-                    )}
-                  >
-                    <Checkbox
-                      className="mt-1"
-                      checked={done}
-                      aria-label={
-                        done ? "Mark mission incomplete" : "Mark mission complete"
-                      }
-                      onCheckedChange={(state) =>
-                        handleToggle(target.id, state === true)
-                      }
-                    />
-
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                        <span
-                          className={cn(
-                            "text-xs font-semibold tracking-wider uppercase",
-                            done ? "text-primary" : "text-muted-foreground",
-                          )}
-                        >
-                          {location?.subject.name ?? "Syllabus"}
-                        </span>
-                        {location ? (
-                          <span className="text-xs text-muted-foreground">
-                            {location.chapter.title
-                              ? `Ch ${location.chapter.number} — ${location.chapter.title}`
-                              : `Ch ${location.chapter.number}`}
-                          </span>
-                        ) : null}
-                      </div>
-
-                      <p
-                        className={cn(
-                          "mt-0.5 text-sm font-medium tracking-tight",
-                          done && "text-muted-foreground line-through",
-                        )}
-                      >
-                        {location?.item.title ?? target.syllabusItemId}
-                      </p>
-
-                      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-                        <span className="font-medium text-primary tabular-nums">
-                          +{target.xp} XP
-                        </span>
-                        {done ? (
-                          <span className="inline-flex items-center gap-1 text-muted-foreground">
-                            <CheckCircle2 className="size-3.5" aria-hidden />
-                            Done
-                          </span>
-                        ) : null}
-                        {syllabusDone && !done ? (
-                          <span className="text-muted-foreground">
-                            Already in syllabus
-                          </span>
-                        ) : null}
-                      </div>
-                    </div>
-
-                    <div className="flex shrink-0 items-center gap-1">
-                      {!done ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-7 cursor-pointer px-2 text-xs"
-                          disabled={Boolean(active) && !studyingHere}
-                          title={
-                            active && !studyingHere
-                              ? "A timer is already running"
-                              : "Start a study session for this mission"
-                          }
-                          onClick={() => handleStartSession(target.syllabusItemId)}
-                        >
-                          <Play className="size-3" aria-hidden />
-                          {studyingHere ? "Studying" : "Start session"}
-                        </Button>
-                      ) : null}
-                      {!done ? (
-                        <Button
-                          size="icon-sm"
-                          variant="ghost"
-                          className="h-7 w-7 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-                          aria-label="Remove mission"
-                          title="Remove mission"
-                          onClick={() => removeMission(target.id)}
-                        >
-                          <X className="size-3.5" aria-hidden />
-                        </Button>
-                      ) : null}
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-
-          {planned > 0 ? (
-            <div className="flex items-center justify-between pt-2 text-xs text-muted-foreground">
-              <span>
-                {completed} of {planned} planned for today
-              </span>
-              <button
-                type="button"
-                className="cursor-pointer font-medium text-primary hover:underline"
-                onClick={() => setDialogOpen(true)}
-              >
-                + Add mission
-              </button>
-            </div>
-          ) : null}
-        </CardContent>
+        <CardContent className="space-y-2">{listBlock}</CardContent>
       </Card>
-
-      <AddMissionDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        defaultDate={key}
-      />
+      {dialog}
     </>
   );
 }

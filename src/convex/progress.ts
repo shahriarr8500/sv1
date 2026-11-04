@@ -11,7 +11,7 @@ import { mutation, query } from "./_generated/server";
  * Convex Auth owns the sign-in flow itself, so a ban is enforced here instead:
  * every function that touches a student's own data refuses banned accounts.
  */
-async function requireActiveUser(
+export async function requireActiveUser(
   ctx: GenericQueryCtx<DataModel> | GenericMutationCtx<DataModel>,
 ): Promise<Id<"users">> {
   const userId = await getAuthUserId(ctx);
