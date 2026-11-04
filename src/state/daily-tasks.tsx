@@ -140,7 +140,6 @@ const DailyTasksContext = createContext<DailyTasksContextValue | null>(null);
 const MAX_SUBSCRIPTIONS = 3;
 
 const EMPTY_TASKS: DayTask[] = [];
-const EMPTY_SERIES: TaskSeries[] = [];
 
 const PRIORITY_ORDER: Record<TaskPriority, number> = { low: 0, medium: 1, high: 2 };
 
@@ -272,25 +271,6 @@ export function DailyTasksProvider({ children }: { children: ReactNode }) {
     for (const row of rows) map.set(taskKey(row.taskId, row.date), row);
     return map;
   }, [rows]);
-
-  // Drop overlay entries the server has caught up with.
-  useEffect(() => {
-    setOverlay((previous) => {
-      const keys = Object.keys(previous);
-      if (keys.length === 0) return previous;
-      let changed = false;
-      const next = { ...previous };
-      for (const key of keys) {
-        const row = rowByKey.get(key);
-        if (!row) continue;
-        if ((row.completedAt != null) === next[key]) {
-          delete next[key];
-          changed = true;
-        }
-      }
-      return changed ? next : previous;
-    });
-  }, [rowByKey]);
 
   const tasks = useMemo<DayTask[]>(() => {
     const list = rows.map((row) => {
@@ -430,7 +410,19 @@ export function DailyTasksProvider({ children }: { children: ReactNode }) {
   const setCompleted = useCallback(
     async (taskId: Id<"dailyTasks">, date: string, completed: boolean) => {
       const key = taskKey(taskId, date);
-      setOverlay((previous) => ({ ...previous, [key]: completed }));
+      setOverlay((previous) => {
+        // Entries live only while the server disagrees with them: drop the ones
+        // it has already caught up with, then stage this toggle.
+        const next: Record<string, boolean> = {};
+        for (const [entryKey, desired] of Object.entries(previous)) {
+          const row = rowByKey.get(entryKey);
+          const settled =
+            row !== undefined && (row.completedAt != null) === desired;
+          if (!settled) next[entryKey] = desired;
+        }
+        next[key] = completed;
+        return next;
+      });
       try {
         await completionMutation({ taskId, date, completed });
       } catch (error) {
@@ -443,7 +435,7 @@ export function DailyTasksProvider({ children }: { children: ReactNode }) {
         throw error;
       }
     },
-    [completionMutation],
+    [completionMutation, rowByKey],
   );
 
   const value = useMemo<DailyTasksContextValue>(

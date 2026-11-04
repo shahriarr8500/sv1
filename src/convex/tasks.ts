@@ -108,8 +108,9 @@ function toDraft(input: {
 }
 
 function stripUser<T extends { userId: Id<"users"> }>(doc: T): Omit<T, "userId"> {
-  const { userId: _owner, ...rest } = doc;
-  return rest;
+  const copy: Record<string, unknown> = { ...doc };
+  delete copy.userId;
+  return copy as unknown as Omit<T, "userId">;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -253,8 +254,23 @@ export const listWindow = query({
       .withIndex("by_user", (q) => q.eq("userId", userId))
       .take(500);
 
+    // One row per (task, day). Materialisation is already idempotent; this also
+    // guards the case of two devices syncing the same window at once.
+    const byKey = new Map<string, Doc<"taskOccurrences">>();
+    for (const row of occurrences) {
+      if (row.deletedAt) continue;
+      const key = `${row.taskId as string}|${row.date}`;
+      const kept = byKey.get(key);
+      const keep =
+        !kept ||
+        (kept.completedAt == null && row.completedAt != null) ||
+        ((kept.completedAt == null) === (row.completedAt == null) &&
+          row.updatedAt > kept.updatedAt);
+      if (keep) byKey.set(key, row);
+    }
+
     return {
-      occurrences: occurrences.filter((row) => !row.deletedAt).map(stripUser),
+      occurrences: [...byKey.values()].map(stripUser),
       tasks: tasks.map(stripUser),
     };
   },
@@ -482,10 +498,11 @@ export const updateTask = mutation({
       updatedAt: now,
     };
 
+    // Only this series' own days — never another task's rows.
     const rows = await ctx.db
       .query("taskOccurrences")
-      .withIndex("by_user_date", (q) =>
-        q.eq("userId", userId).gte("date", anchor).lte("date", "9999-12-31"),
+      .withIndex("by_task_date", (q) =>
+        q.eq("taskId", task._id).gte("date", anchor),
       )
       .take(2000);
     for (const row of rows) {
@@ -547,10 +564,11 @@ export const deleteTask = mutation({
       });
     }
 
+    // Only this series' own days — never another task's rows.
     const rows = await ctx.db
       .query("taskOccurrences")
-      .withIndex("by_user_date", (q) =>
-        q.eq("userId", userId).gte("date", anchor).lte("date", "9999-12-31"),
+      .withIndex("by_task_date", (q) =>
+        q.eq("taskId", task._id).gte("date", anchor),
       )
       .take(2000);
     for (const row of rows) {

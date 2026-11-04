@@ -11,9 +11,12 @@
  * property of the series, never of one day — so the option narrows itself and
  * says why instead of silently discarding the edit. Deleting asks for a
  * confirmation that spells out exactly which days will go.
+ *
+ * The form is mounted only while the dialog is open, so every open starts from
+ * the task's saved values without a reset effect to keep in sync.
  */
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { ListTodo, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -75,13 +78,7 @@ function sameWeekdays(a: number[], b: number[]): boolean {
   return left.every((value, index) => value === right[index]);
 }
 
-export function TaskDialog({
-  open,
-  onOpenChange,
-  task,
-  defaultDate,
-  onSaved,
-}: {
+type TaskDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** The task being edited; null = create mode. */
@@ -90,45 +87,66 @@ export function TaskDialog({
   defaultDate?: string;
   /** Fired after a successful save or delete. */
   onSaved?: () => void;
+};
+
+export function TaskDialog({
+  open,
+  onOpenChange,
+  task,
+  defaultDate,
+  onSaved,
+}: TaskDialogProps) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      {open ? (
+        <TaskForm
+          task={task ?? null}
+          defaultDate={defaultDate}
+          onSaved={onSaved}
+          onOpenChange={onOpenChange}
+        />
+      ) : null}
+    </Dialog>
+  );
+}
+
+function TaskForm({
+  task,
+  defaultDate,
+  onSaved,
+  onOpenChange,
+}: {
+  task: DayTask | null;
+  defaultDate?: string;
+  onSaved?: () => void;
+  onOpenChange: (open: boolean) => void;
 }) {
   const { createTask, updateTask, deleteTask, getSeries } = useDailyTasks();
+  const series = task ? getSeries(task.taskId) : undefined;
 
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [date, setDate] = useState(defaultDate ?? todayKey());
-  const [priority, setPriority] = useState<TaskPriority>("medium");
-  const [category, setCategory] = useState<string>(DEFAULT_CATEGORY);
-  const [repeat, setRepeat] = useState<TaskRepeat>("none");
-  const [weekdays, setWeekdays] = useState<number[]>(DEFAULT_WEEKDAYS);
-  const [dueTime, setDueTime] = useState("");
+  const [title, setTitle] = useState(task?.title ?? "");
+  const [description, setDescription] = useState(task?.description ?? "");
+  const [date, setDate] = useState(task?.date ?? defaultDate ?? todayKey());
+  const [priority, setPriority] = useState<TaskPriority>(
+    task?.priority ?? "medium",
+  );
+  const [category, setCategory] = useState<string>(
+    series?.category ?? task?.category ?? DEFAULT_CATEGORY,
+  );
+  const [repeat, setRepeat] = useState<TaskRepeat>(series?.repeat ?? "none");
+  const [weekdays, setWeekdays] = useState<number[]>(
+    series?.weekdays ?? DEFAULT_WEEKDAYS,
+  );
+  const [dueTime, setDueTime] = useState(task?.dueTime ?? "");
   const [scope, setScope] = useState<"occurrence" | "future">("future");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
-  // Re-seed the form every time the dialog opens on a (possibly different) task.
-  useEffect(() => {
-    if (!open) return;
-    const series = task ? getSeries(task.taskId) : undefined;
-    setTitle(task?.title ?? "");
-    setDescription(task?.description ?? "");
-    setDate(task?.date ?? defaultDate ?? todayKey());
-    setPriority(task?.priority ?? "medium");
-    setCategory(series?.category ?? task?.category ?? DEFAULT_CATEGORY);
-    setRepeat(series?.repeat ?? "none");
-    setWeekdays(series?.weekdays ?? DEFAULT_WEEKDAYS);
-    setDueTime(task?.dueTime ?? "");
-    setScope(series && series.repeat !== "none" ? "future" : "future");
-    setError(null);
-    setSaving(false);
-    setConfirmingDelete(false);
-  }, [open, task, defaultDate, getSeries]);
-
   const editing = Boolean(task);
-  const originalSeries = task ? getSeries(task.taskId) : undefined;
-  const originalRepeat = originalSeries?.repeat ?? "none";
-  const originalDate = originalSeries?.startDate ?? task?.date ?? date;
-  const originalWeekdays = originalSeries?.weekdays ?? DEFAULT_WEEKDAYS;
+  const originalRepeat = series?.repeat ?? "none";
+  const originalDate = series?.startDate ?? task?.date ?? date;
+  const originalWeekdays = series?.weekdays ?? DEFAULT_WEEKDAYS;
 
   // The schedule lives on the series, so changing it can never be a
   // one-occurrence edit — say so rather than dropping the change on the floor.
@@ -140,8 +158,8 @@ export function TaskDialog({
   const effectiveScope: "occurrence" | "future" =
     scheduleChanged || !editing ? "future" : scope;
 
-  const scheduleHint = originalSeries
-    ? `${describeRepeat(originalSeries)} · from ${formatDateKey(originalSeries.startDate)}`
+  const scheduleHint = series
+    ? `${describeRepeat(series)} · from ${formatDateKey(series.startDate)}`
     : null;
 
   const toggleWeekday = (day: number) => {
@@ -207,7 +225,11 @@ export function TaskDialog({
     if (!task) return;
     setSaving(true);
     try {
-      await deleteTask({ taskId: task.taskId, scope: effectiveScope, date: task.date });
+      await deleteTask({
+        taskId: task.taskId,
+        scope: effectiveScope,
+        date: task.date,
+      });
       onSaved?.();
       onOpenChange(false);
     } catch {
@@ -225,280 +247,272 @@ export function TaskDialog({
         : "this task and every occurrence from here on";
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        onOpenChange(next);
-        if (!next) setConfirmingDelete(false);
-      }}
-    >
-      <DialogContent className="flex max-h-[90vh] flex-col gap-4 p-0 sm:max-w-lg">
-        <DialogHeader className="border-b px-5 pt-5 pb-4 sm:px-6">
-          <DialogTitle className="flex items-center gap-2">
-            <ListTodo className="size-4 text-primary" aria-hidden />
-            {editing ? "Edit task" : "New task"}
-          </DialogTitle>
-          <DialogDescription>
-            {editing
-              ? "Changes can apply to this day alone or to every future day of this task."
-              : "A title is all it takes — add a date, priority or repeat whenever you want."}
-          </DialogDescription>
-        </DialogHeader>
+    <DialogContent className="flex max-h-[90vh] flex-col gap-4 p-0 sm:max-w-lg">
+      <DialogHeader className="border-b px-5 pt-5 pb-4 sm:px-6">
+        <DialogTitle className="flex items-center gap-2">
+          <ListTodo className="size-4 text-primary" aria-hidden />
+          {editing ? "Edit task" : "New task"}
+        </DialogTitle>
+        <DialogDescription>
+          {editing
+            ? "Changes can apply to this day alone or to every future day of this task."
+            : "A title is all it takes — add a date, priority or repeat whenever you want."}
+        </DialogDescription>
+      </DialogHeader>
 
-        {confirmingDelete ? (
-          <div className="space-y-4 px-5 py-2 sm:px-6">
-            <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-4">
-              <p className="text-sm font-semibold">Delete this task?</p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                This removes {deleteScopeLabel}. Days already in the past keep
-                their record, and this can&apos;t be undone.
-              </p>
-            </div>
-            {error ? (
-              <p className="text-sm text-destructive" role="alert">
-                {error}
-              </p>
-            ) : null}
+      {confirmingDelete ? (
+        <div className="space-y-4 px-5 py-2 sm:px-6">
+          <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-4">
+            <p className="text-sm font-semibold">Delete this task?</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              This removes {deleteScopeLabel}. Days already in the past keep
+              their record, and this can&apos;t be undone.
+            </p>
           </div>
-        ) : (
-          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4 sm:px-6">
+          {error ? (
+            <p className="text-sm text-destructive" role="alert">
+              {error}
+            </p>
+          ) : null}
+        </div>
+      ) : (
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4 sm:px-6">
+          <div className="space-y-1.5">
+            <Label htmlFor="task-title">Title</Label>
+            <Input
+              id="task-title"
+              value={title}
+              autoFocus
+              placeholder="Revise organic chemistry"
+              maxLength={200}
+              onChange={(event) => setTitle(event.target.value)}
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="task-description">Description</Label>
+            <Textarea
+              id="task-description"
+              value={description}
+              rows={2}
+              placeholder="Optional — notes for future you"
+              maxLength={2000}
+              onChange={(event) => setDescription(event.target.value)}
+            />
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
-              <Label htmlFor="task-title">Title</Label>
+              <Label htmlFor="task-date">Date</Label>
               <Input
-                id="task-title"
-                value={title}
-                autoFocus
-                placeholder="Revise organic chemistry"
-                maxLength={200}
-                onChange={(event) => setTitle(event.target.value)}
+                id="task-date"
+                type="date"
+                value={date}
+                onChange={(event) => setDate(event.target.value)}
               />
             </div>
-
             <div className="space-y-1.5">
-              <Label htmlFor="task-description">Description</Label>
-              <Textarea
-                id="task-description"
-                value={description}
-                rows={2}
-                placeholder="Optional — notes for future you"
-                maxLength={2000}
-                onChange={(event) => setDescription(event.target.value)}
+              <Label htmlFor="task-time">Due time</Label>
+              <Input
+                id="task-time"
+                type="time"
+                value={dueTime}
+                onChange={(event) => setDueTime(event.target.value)}
               />
             </div>
+          </div>
 
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label htmlFor="task-date">Date</Label>
-                <Input
-                  id="task-date"
-                  type="date"
-                  value={date}
-                  onChange={(event) => setDate(event.target.value)}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="task-time">Due time</Label>
-                <Input
-                  id="task-time"
-                  type="time"
-                  value={dueTime}
-                  onChange={(event) => setDueTime(event.target.value)}
-                />
-              </div>
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label htmlFor="task-priority">Priority</Label>
-                <Select
-                  value={priority}
-                  onValueChange={(value) => setPriority(value as TaskPriority)}
-                >
-                  <SelectTrigger id="task-priority" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {TASK_PRIORITIES.map((entry) => (
-                      <SelectItem key={entry.id} value={entry.id}>
-                        {entry.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="task-category">Category</Label>
-                <Select
-                  value={isPresetCategory(category) ? category : "custom"}
-                  onValueChange={(value) =>
-                    setCategory(value === "custom" ? "" : value)
-                  }
-                >
-                  <SelectTrigger id="task-category" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {TASK_CATEGORIES.map((entry) => (
-                      <SelectItem key={entry.id} value={entry.id}>
-                        {entry.label}
-                      </SelectItem>
-                    ))}
-                    <SelectItem value="custom">Custom…</SelectItem>
-                  </SelectContent>
-                </Select>
-                {!isPresetCategory(category) ? (
-                  <Input
-                    value={category}
-                    placeholder="Name your category"
-                    maxLength={40}
-                    className="mt-1.5"
-                    aria-label="Custom category"
-                    onChange={(event) => setCategory(event.target.value)}
-                  />
-                ) : null}
-              </div>
-            </div>
-
+          <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
-              <Label htmlFor="task-repeat">Repeat</Label>
+              <Label htmlFor="task-priority">Priority</Label>
               <Select
-                value={repeat}
-                onValueChange={(value) => setRepeat(value as TaskRepeat)}
+                value={priority}
+                onValueChange={(value) => setPriority(value as TaskPriority)}
               >
-                <SelectTrigger id="task-repeat" className="w-full">
+                <SelectTrigger id="task-priority" className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {REPEAT_OPTIONS.map((entry) => (
+                  {TASK_PRIORITIES.map((entry) => (
                     <SelectItem key={entry.id} value={entry.id}>
                       {entry.label}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-              {scheduleHint ? (
-                <p className="text-xs text-muted-foreground">{scheduleHint}</p>
-              ) : null}
             </div>
 
-            {repeat === "weekdays" ? (
-              <div className="space-y-1.5">
-                <Label>Weekdays</Label>
-                <div className="flex flex-wrap gap-1.5">
-                  {WEEKDAY_LABELS.map((label, day) => (
-                    <button
-                      key={day}
-                      type="button"
-                      aria-pressed={weekdays.includes(day)}
-                      aria-label={WEEKDAY_NAMES[day]}
-                      className={cn(
-                        "size-9 cursor-pointer rounded-full border text-xs font-medium transition-colors",
-                        weekdays.includes(day)
-                          ? "border-primary bg-primary text-primary-foreground"
-                          : "border-border text-muted-foreground hover:border-primary/50 hover:text-foreground",
-                      )}
-                      onClick={() => toggleWeekday(day)}
-                    >
-                      {label}
-                    </button>
+            <div className="space-y-1.5">
+              <Label htmlFor="task-category">Category</Label>
+              <Select
+                value={isPresetCategory(category) ? category : "custom"}
+                onValueChange={(value) =>
+                  setCategory(value === "custom" ? "" : value)
+                }
+              >
+                <SelectTrigger id="task-category" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {TASK_CATEGORIES.map((entry) => (
+                    <SelectItem key={entry.id} value={entry.id}>
+                      {entry.label}
+                    </SelectItem>
                   ))}
-                </div>
-              </div>
-            ) : null}
+                  <SelectItem value="custom">Custom…</SelectItem>
+                </SelectContent>
+              </Select>
+              {!isPresetCategory(category) ? (
+                <Input
+                  value={category}
+                  placeholder="Name your category"
+                  maxLength={40}
+                  className="mt-1.5"
+                  aria-label="Custom category"
+                  onChange={(event) => setCategory(event.target.value)}
+                />
+              ) : null}
+            </div>
+          </div>
 
-            {editing && originalRepeat !== "none" ? (
-              <div className="space-y-1.5">
-                <Label>Apply to</Label>
-                <div className="grid gap-1.5">
-                  <ScopeOption
-                    selected={effectiveScope === "occurrence"}
-                    disabled={scheduleChanged}
-                    label="Only this occurrence"
-                    hint={formatDateKey(task?.date ?? date)}
-                    onSelect={() => setScope("occurrence")}
-                  />
-                  <ScopeOption
-                    selected={effectiveScope === "future"}
-                    label="This and future occurrences"
-                    hint={
-                      scheduleChanged
-                        ? "schedule changes apply here"
-                        : `from ${formatDateKey(task?.date ?? date)} on`
-                    }
-                    onSelect={() => setScope("future")}
-                  />
-                </div>
-                {scheduleChanged ? (
-                  <p className="text-xs text-muted-foreground">
-                    A new date or repeat rule always applies from this day
-                    onwards — earlier days keep their history.
-                  </p>
-                ) : null}
-              </div>
-            ) : null}
-
-            {error ? (
-              <p className="text-sm text-destructive" role="alert">
-                {error}
-              </p>
+          <div className="space-y-1.5">
+            <Label htmlFor="task-repeat">Repeat</Label>
+            <Select
+              value={repeat}
+              onValueChange={(value) => setRepeat(value as TaskRepeat)}
+            >
+              <SelectTrigger id="task-repeat" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {REPEAT_OPTIONS.map((entry) => (
+                  <SelectItem key={entry.id} value={entry.id}>
+                    {entry.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {scheduleHint ? (
+              <p className="text-xs text-muted-foreground">{scheduleHint}</p>
             ) : null}
           </div>
-        )}
 
-        <DialogFooter className="border-t px-5 py-4 sm:px-6">
-          {confirmingDelete ? (
-            <>
+          {repeat === "weekdays" ? (
+            <div className="space-y-1.5">
+              <Label>Weekdays</Label>
+              <div className="flex flex-wrap gap-1.5">
+                {WEEKDAY_LABELS.map((label, day) => (
+                  <button
+                    key={day}
+                    type="button"
+                    aria-pressed={weekdays.includes(day)}
+                    aria-label={WEEKDAY_NAMES[day]}
+                    className={cn(
+                      "size-9 cursor-pointer rounded-full border text-xs font-medium transition-colors",
+                      weekdays.includes(day)
+                        ? "border-primary bg-primary text-primary-foreground"
+                        : "border-border text-muted-foreground hover:border-primary/50 hover:text-foreground",
+                    )}
+                    onClick={() => toggleWeekday(day)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {editing && originalRepeat !== "none" ? (
+            <div className="space-y-1.5">
+              <Label>Apply to</Label>
+              <div className="grid gap-1.5">
+                <ScopeOption
+                  selected={effectiveScope === "occurrence"}
+                  disabled={scheduleChanged}
+                  label="Only this occurrence"
+                  hint={formatDateKey(task?.date ?? date)}
+                  onSelect={() => setScope("occurrence")}
+                />
+                <ScopeOption
+                  selected={effectiveScope === "future"}
+                  label="This and future occurrences"
+                  hint={
+                    scheduleChanged
+                      ? "schedule changes apply here"
+                      : `from ${formatDateKey(task?.date ?? date)} on`
+                  }
+                  onSelect={() => setScope("future")}
+                />
+              </div>
+              {scheduleChanged ? (
+                <p className="text-xs text-muted-foreground">
+                  A new date or repeat rule always applies from this day onwards
+                  — earlier days keep their history.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
+          {error ? (
+            <p className="text-sm text-destructive" role="alert">
+              {error}
+            </p>
+          ) : null}
+        </div>
+      )}
+
+      <DialogFooter className="border-t px-5 py-4 sm:px-6">
+        {confirmingDelete ? (
+          <>
+            <Button
+              variant="ghost"
+              className="cursor-pointer"
+              disabled={saving}
+              onClick={() => setConfirmingDelete(false)}
+            >
+              Keep task
+            </Button>
+            <Button
+              variant="destructive"
+              className="cursor-pointer"
+              disabled={saving}
+              onClick={() => void handleDelete()}
+            >
+              <Trash2 className="size-4" aria-hidden />
+              Delete
+            </Button>
+          </>
+        ) : (
+          <>
+            {editing ? (
               <Button
                 variant="ghost"
-                className="cursor-pointer"
-                disabled={saving}
-                onClick={() => setConfirmingDelete(false)}
-              >
-                Keep task
-              </Button>
-              <Button
-                variant="destructive"
-                className="cursor-pointer"
-                disabled={saving}
-                onClick={() => void handleDelete()}
+                className="mr-auto cursor-pointer text-destructive hover:text-destructive"
+                onClick={() => setConfirmingDelete(true)}
               >
                 <Trash2 className="size-4" aria-hidden />
                 Delete
               </Button>
-            </>
-          ) : (
-            <>
-              {editing ? (
-                <Button
-                  variant="ghost"
-                  className="mr-auto cursor-pointer text-destructive hover:text-destructive"
-                  onClick={() => setConfirmingDelete(true)}
-                >
-                  <Trash2 className="size-4" aria-hidden />
-                  Delete
-                </Button>
-              ) : null}
-              <Button
-                variant="ghost"
-                className="cursor-pointer"
-                disabled={saving}
-                onClick={() => onOpenChange(false)}
-              >
-                Cancel
-              </Button>
-              <Button
-                className="cursor-pointer"
-                disabled={saving}
-                onClick={() => void handleSave()}
-              >
-                {saving ? "Saving…" : editing ? "Save changes" : "Add task"}
-              </Button>
-            </>
-          )}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+            ) : null}
+            <Button
+              variant="ghost"
+              className="cursor-pointer"
+              disabled={saving}
+              onClick={() => onOpenChange(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              className="cursor-pointer"
+              disabled={saving}
+              onClick={() => void handleSave()}
+            >
+              {saving ? "Saving…" : editing ? "Save changes" : "Add task"}
+            </Button>
+          </>
+        )}
+      </DialogFooter>
+    </DialogContent>
   );
 }
 
