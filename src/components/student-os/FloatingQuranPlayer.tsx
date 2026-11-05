@@ -26,9 +26,10 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
-import { SURAHS } from "@/lib/student-os/quran";
+import { SURAHS, ayahCount } from "@/lib/student-os/quran";
 import { cn } from "@/lib/utils";
 import { quranPlayer, useQuranPlayer } from "@/state/quran-player";
+import { useLocation } from "react-router";
 
 function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
@@ -38,15 +39,19 @@ function formatTime(seconds: number): string {
 }
 
 /** Bottom offsets: clear the mobile tab bar (64px) + safe area; desktop is lower. */
-const BUTTON_BOTTOM = "bottom-[calc(80px+env(safe-area-inset-bottom))] lg:bottom-[calc(16px+env(safe-area-inset-bottom))]";
-const PANEL_BOTTOM = "bottom-[calc(140px+env(safe-area-inset-bottom))] lg:bottom-[calc(76px+env(safe-area-inset-bottom))]";
+const BUTTON_BOTTOM =
+  "bottom-[calc(80px+env(safe-area-inset-bottom))] lg:bottom-[calc(16px+env(safe-area-inset-bottom))]";
+const PANEL_BOTTOM =
+  "bottom-[calc(140px+env(safe-area-inset-bottom))] lg:bottom-[calc(76px+env(safe-area-inset-bottom))]";
 
 export function FloatingQuranPlayer() {
   const state = useQuranPlayer();
+  const location = useLocation();
   const [query, setQuery] = useState("");
   const panelRef = useRef<HTMLDivElement | null>(null);
 
   const current = SURAHS[state.surah - 1] ?? SURAHS[0];
+  const total = ayahCount(state.surah);
 
   const results = useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -85,6 +90,10 @@ export function FloatingQuranPlayer() {
   const expanded = state.expanded;
   const playing = state.playing;
 
+  // The reading page has its own sticky, Ayah-aware player; showing this one on
+  // top of it would stack two identical control bars.
+  if (location.pathname.startsWith("/quran")) return null;
+
   return (
     <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40">
       {expanded ? (
@@ -96,8 +105,7 @@ export function FloatingQuranPlayer() {
             PANEL_BOTTOM,
           )}
           style={{
-            maxHeight:
-              "calc(100dvh - 200px - env(safe-area-inset-bottom))",
+            maxHeight: "calc(100dvh - 200px - env(safe-area-inset-bottom))",
           }}
         >
           <div className="sticky top-0 z-10 flex items-center justify-between border-b bg-card px-3 py-2 sm:px-4">
@@ -121,6 +129,9 @@ export function FloatingQuranPlayer() {
             <div className="flex flex-wrap items-center gap-2">
               <span className="min-w-0 flex-1 truncate text-sm font-medium">
                 {current.name}
+                <span className="ml-2 text-xs font-normal text-muted-foreground tabular-nums">
+                  Ayah {state.ayah} of {total}
+                </span>
               </span>
               <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
                 {formatTime(state.currentTime)}
@@ -151,8 +162,8 @@ export function FloatingQuranPlayer() {
                   type="button"
                   variant="ghost"
                   size="icon"
-                  aria-label="Previous Surah"
-                  disabled={state.surah <= 1}
+                  aria-label="Previous Ayah"
+                  disabled={state.ayah <= 1}
                   className="rounded-full"
                   onClick={() => quranPlayer.previous()}
                 >
@@ -176,8 +187,11 @@ export function FloatingQuranPlayer() {
                   type="button"
                   variant="ghost"
                   size="icon"
-                  aria-label="Next Surah"
-                  disabled={state.surah >= SURAHS.length}
+                  aria-label="Next Ayah"
+                  disabled={
+                    state.ayah >= total &&
+                    !(state.continueNextSurah && state.surah < SURAHS.length)
+                  }
                   className="rounded-full"
                   onClick={() => quranPlayer.next()}
                 >
@@ -215,7 +229,9 @@ export function FloatingQuranPlayer() {
                   max={100}
                   step={1}
                   aria-label="Volume"
-                  onValueChange={([value]) => quranPlayer.setVolume(value / 100)}
+                  onValueChange={([value]) =>
+                    quranPlayer.setVolume(value / 100)
+                  }
                   className="w-20"
                 />
               </div>

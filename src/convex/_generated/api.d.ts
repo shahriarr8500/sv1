@@ -20,6 +20,7 @@ import type * as auth_emailOtp from "../auth/emailOtp.js";
 import type * as http from "../http.js";
 import type * as impersonation from "../impersonation.js";
 import type * as progress from "../progress.js";
+import type * as quran from "../quran.js";
 import type * as tasks from "../tasks.js";
 import type * as users from "../users.js";
 
@@ -42,6 +43,7 @@ declare const fullApi: ApiFromModules<{
   http: typeof http;
   impersonation: typeof impersonation;
   progress: typeof progress;
+  quran: typeof quran;
   tasks: typeof tasks;
   users: typeof users;
 }>;

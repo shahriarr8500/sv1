@@ -365,6 +365,35 @@ const schema = defineSchema(
       .index("by_user_date", ["userId", "date"])
       .index("by_task_date", ["taskId", "date"]),
 
+    // ------------------------------------------------------------------ //
+    // Quran reading — saved Ayahs and the reader's own place in the book.
+    // Bookmarks keep a short snapshot of the text so the saved list still
+    // reads correctly even when the Surah itself is not loaded.
+    // ------------------------------------------------------------------ //
+    quranBookmarks: defineTable({
+      userId: v.id("users"),
+      surah: v.number(),
+      ayah: v.number(),
+      /** Snapshot of the Ayah at the moment it was saved. */
+      arabic: v.string(),
+      translation: v.string(),
+      translationEdition: v.string(),
+      createdAt: v.number(),
+    })
+      .index("by_user_created", ["userId", "createdAt"])
+      .index("by_user_ayah", ["userId", "surah", "ayah"]),
+
+    // One row per reader: where they stopped and which Surahs they finished.
+    // A Surah is only recorded here after real reading, never from playback.
+    quranReading: defineTable({
+      userId: v.id("users"),
+      lastSurah: v.number(),
+      lastAyah: v.number(),
+      /** Surah numbers read to the end, ascending, deduplicated. */
+      completedSurahs: v.array(v.number()),
+      updatedAt: v.number(),
+    }).index("by_user", ["userId"]),
+
     // tableName: defineTable({
     //   ...
     //   // table fields

@@ -164,11 +164,147 @@ export function firstGlobalAyah(surah: number): number {
 }
 
 /**
- * Full-surah recitation. One continuous stream keeps "Listen" simple: no
- * per-ayah gaps and nothing starts until the student presses play.
+ * Full-surah recitation — kept for the whole-surah stream that existed before
+ * per-Ayah playback. The reading page uses `ayahAudioUrl` instead.
  */
 export function surahAudioUrl(surah: number): string {
   return `https://cdn.islamic.network/quran/audio-surah/128/ar.alafasy/${surah}.mp3`;
+}
+
+/** Every Ayah in the Quran, by the standard Kufan count. */
+export const TOTAL_AYAHS = 6236;
+
+export function ayahCount(surah: number): number {
+  return getSurah(surah)?.ayahs ?? 0;
+}
+
+/** Running Ayah number across the whole Quran (1…6236). */
+export function globalAyahNumber(surah: number, ayah: number): number {
+  return firstGlobalAyah(surah) + ayah - 1;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Reciters — per-Ayah audio                                                   */
+/* -------------------------------------------------------------------------- */
+
+export interface Reciter {
+  /** CDN path segment, e.g. `ar.alafasy`. */
+  id: string;
+  name: string;
+  arabicName: string;
+}
+
+/**
+ * Reciters served by the Islamic Network CDN. Each identifier was checked
+ * against the per-Ayah endpoint before being listed, so a reciter in this list
+ * always has playable Ayah files rather than a silently broken URL.
+ */
+export const RECITERS: Reciter[] = [
+  {
+    id: "ar.alafasy",
+    name: "Mishary Rashid Alafasy",
+    arabicName: "مشاري راشد العفاسي",
+  },
+  {
+    id: "ar.husary",
+    name: "Mahmoud Khalil Al-Husary",
+    arabicName: "محمود خليل الحصري",
+  },
+  {
+    id: "ar.minshawi",
+    name: "Mohamed Siddiq El-Minshawi",
+    arabicName: "محمد صديق المنشاوي",
+  },
+  {
+    id: "ar.shaatree",
+    name: "Abu Bakr Ash-Shaatree",
+    arabicName: "أبو بكر الشاطري",
+  },
+];
+
+export const DEFAULT_RECITER = "ar.alafasy";
+
+export function getReciter(id: string): Reciter {
+  return RECITERS.find((reciter) => reciter.id === id) ?? RECITERS[0];
+}
+
+export function reciterName(id: string): string {
+  return getReciter(id).name;
+}
+
+/**
+ * One audio file per Ayah.
+ *
+ * The CDN addresses these files by the *running* Ayah number across the whole
+ * Quran (1…6236), not by Surah-local number, which is why `globalAyahNumber`
+ * exists. Because every Ayah is its own file, the reading highlight follows
+ * real playback instead of an interpolated timestamp.
+ */
+export function ayahAudioUrl(
+  surah: number,
+  ayah: number,
+  reciter: string = DEFAULT_RECITER,
+): string {
+  const global = globalAyahNumber(surah, ayah);
+  return `https://cdn.islamic.network/quran/audio/128/${reciter}/${global}.mp3`;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Translations                                                                */
+/* -------------------------------------------------------------------------- */
+
+export interface TranslationEdition {
+  /** AlQuran Cloud edition identifier. */
+  id: string;
+  /** Edition name shown in the selector. */
+  name: string;
+  /** Translator credited under every translated Ayah. */
+  translator: string;
+}
+
+/**
+ * English editions fetched from the AlQuran Cloud API (the same source the
+ * app already used for audio). The Arabic text is always the Tanzil Uthmani
+ * edition; only the translation changes when the reader switches edition.
+ */
+export const TRANSLATIONS: TranslationEdition[] = [
+  {
+    id: "en.sahih",
+    name: "Saheeh International",
+    translator: "Saheeh International",
+  },
+  {
+    id: "en.pickthall",
+    name: "Pickthall",
+    translator: "Mohammed Marmaduke William Pickthall",
+  },
+  {
+    id: "en.yusufali",
+    name: "Yusuf Ali",
+    translator: "Abdullah Yusuf Ali",
+  },
+];
+
+export const DEFAULT_TRANSLATION = "en.sahih";
+
+export function getTranslation(id: string): TranslationEdition {
+  return TRANSLATIONS.find((edition) => edition.id === id) ?? TRANSLATIONS[0];
+}
+
+/* -------------------------------------------------------------------------- */
+/* Bismillah                                                                   */
+/* -------------------------------------------------------------------------- */
+
+/** Uthmani spelling, matching the edition served by the API. */
+export const BISMILLAH = "بِسْمِ ٱللَّهِ ٱلرَّحْمَٰنِ ٱلرَّحِيمِ";
+
+/**
+ * At-Tawbah opens without the Bismillah, and in Al-Fatihah the Bismillah *is*
+ * Ayah 1 — so neither Surah gets a separate opening line. Every other Surah
+ * does, and it is never counted as an Ayah.
+ */
+export function showsSeparateBismillah(surah: number): boolean {
+  return surah !== 1 && surah !== 9;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -207,8 +343,10 @@ const GUIDANCE: GuidanceEntry[] = [
     surah: 2,
     ayah: 152,
     arabic: "فَاذْكُرُونِي أَذْكُرْكُمْ وَاشْكُرُوا لِي وَلَا تَكْفُرُونِ",
-    english: "So remember Me; I will remember you. And be grateful to Me and do not deny Me.",
-    bangla: "তুমি আমাকে স্মরণ কর, আমি তোমাকে স্মরণ করব। আমাকে কৃতজ্ঞতা জ্ঞাপন কর এবং অকৃতজ্ঞ হও না।",
+    english:
+      "So remember Me; I will remember you. And be grateful to Me and do not deny Me.",
+    bangla:
+      "তুমি আমাকে স্মরণ কর, আমি তোমাকে স্মরণ করব। আমাকে কৃতজ্ঞতা জ্ঞাপন কর এবং অকৃতজ্ঞ হও না।",
     reflection:
       "Gratitude before effort. Name one thing that is going well before you start.",
     reminder: "Begin with thanks, not pressure.",
@@ -239,9 +377,12 @@ const GUIDANCE: GuidanceEntry[] = [
     id: "imran-139",
     surah: 3,
     ayah: 139,
-    arabic: "وَلَا تَهِنُوا وَلَا تَحْزَنُوا وَأَنتُمُ الْأَعْلَوْنَ إِن كُنتُم مُّؤْمِنِينَ",
-    english: "Do not weaken and do not grieve, for you will be superior if you are believers.",
-    bangla: "দুর্বল হও না এবং বিষণ্ন হও না; তুমি প্রবল পক্ষে, যদি তুমি বিশ্বাসী হও।",
+    arabic:
+      "وَلَا تَهِنُوا وَلَا تَحْزَنُوا وَأَنتُمُ الْأَعْلَوْنَ إِن كُنتُم مُّؤْمِنِينَ",
+    english:
+      "Do not weaken and do not grieve, for you will be superior if you are believers.",
+    bangla:
+      "দুর্বল হও না এবং বিষণ্ন হও না; তুমি প্রবল পক্ষে, যদি তুমি বিশ্বাসী হও।",
     reflection:
       "Weak days are not failed days. They are the ones that build the habit.",
     reminder: "You are allowed to start again.",
@@ -263,7 +404,8 @@ const GUIDANCE: GuidanceEntry[] = [
     ayah: 7,
     arabic: "لَئِن شَكَرْتُمْ لَأَزِيدَنَّكُمْ",
     english: "If you are grateful, I will surely increase you.",
-    bangla: "তুমি যদি কৃতজ্ঞতা জ্ঞাপন কর, তবে অবশ্যই আমি তোমাদের বৃদ্ধি দান করব।",
+    bangla:
+      "তুমি যদি কৃতজ্ঞতা জ্ঞাপন কর, তবে অবশ্যই আমি তোমাদের বৃদ্ধি দান করব।",
     reflection:
       "Notice the progress you already made before chasing the next number.",
     reminder: "Increase follows appreciation.",
@@ -273,8 +415,10 @@ const GUIDANCE: GuidanceEntry[] = [
     surah: 29,
     ayah: 69,
     arabic: "وَالَّذِينَ جَاهَدُوا فِينَا لَنَهْدِيَنَّهُمْ سُبُلَنَا",
-    english: "And those who strive for Us — We will surely guide them to Our ways.",
-    bangla: "যারা আমাদের পথে সংগ্রাম করে, আমি অবশ্যই তাদের আমাদের পথ প্রদর্শন করব।",
+    english:
+      "And those who strive for Us — We will surely guide them to Our ways.",
+    bangla:
+      "যারা আমাদের পথে সংগ্রাম করে, আমি অবশ্যই তাদের আমাদের পথ প্রদর্শন করব।",
     reflection:
       "Effort comes before clarity. The direction shows up once you move.",
     reminder: "Start, and the path opens.",
@@ -285,7 +429,8 @@ const GUIDANCE: GuidanceEntry[] = [
     ayah: 5,
     arabic: "وَلَسَوْفَ يُعْطِيكَ رَبُّكَ فَتَرْضَىٰ",
     english: "And your Lord is going to give you, and you will be satisfied.",
-    bangla: "এবং তোমার প্রতিপালক তোমাকে অবশ্যই দান করবেন, তখন তুমি সন্তুষ্ট হবে।",
+    bangla:
+      "এবং তোমার প্রতিপালক তোমাকে অবশ্যই দান করবেন, তখন তুমি সন্তুষ্ট হবে।",
     reflection:
       "Progress you cannot see yet is still progress. Trust the quiet weeks.",
     reminder: "Keep going; the result will come.",
@@ -294,7 +439,8 @@ const GUIDANCE: GuidanceEntry[] = [
     id: "baqarah-153",
     surah: 2,
     ayah: 153,
-    arabic: "يَا أَيُّهَا الَّذِينَ آمَنُوا اسْتَعِينُوا بِالصَّبْرِ وَالصَّلَاةِ",
+    arabic:
+      "يَا أَيُّهَا الَّذِينَ آمَنُوا اسْتَعِينُوا بِالصَّبْرِ وَالصَّلَاةِ",
     english: "O you who believe, seek help through patience and prayer.",
     bangla: "হে বিশ্বাসীগণ, ধৈর্য ও নামাজের মাধ্যমে সাহায্য গ্রহণ কর।",
     reflection:
@@ -316,8 +462,10 @@ const GUIDANCE: GuidanceEntry[] = [
     id: "ahzab-70",
     surah: 33,
     ayah: 70,
-    arabic: "يَا أَيُّهَا الَّذِينَ آمَنُوا اتَّقُوا اللَّهَ وَقُولُوا قَوْلًا سَدِيدًا",
-    english: "O you who believe, fear Allah and speak words of appropriate justice.",
+    arabic:
+      "يَا أَيُّهَا الَّذِينَ آمَنُوا اتَّقُوا اللَّهَ وَقُولُوا قَوْلًا سَدِيدًا",
+    english:
+      "O you who believe, fear Allah and speak words of appropriate justice.",
     bangla: "হে বিশ্বাসীগণ, আল্লাহকে ভয় কর এবং সুন্দর ও যথাযথ কথা বল।",
     reflection:
       "Accuracy matters in study too. Check the work before you move on.",
@@ -327,9 +475,12 @@ const GUIDANCE: GuidanceEntry[] = [
     id: "anfal-46",
     surah: 8,
     ayah: 46,
-    arabic: "وَأَطِيعُوا اللَّهَ وَرَسُولَهُ وَلَا تَنَازَعُوا فَتَفْشَلُوا وَتَذْهَبَ رِيحُكُمْ",
-    english: "Obey Allah and His Messenger and do not dispute, or you will lose courage.",
-    bangla: "আল্লাহ ও তাঁর রসূলের আনুগত্য কর এবং বিবাদ করো না, তাহলে তোমাদের শক্তি নষ্ট হয়ে যাবে।",
+    arabic:
+      "وَأَطِيعُوا اللَّهَ وَرَسُولَهُ وَلَا تَنَازَعُوا فَتَفْشَلُوا وَتَذْهَبَ رِيحُكُمْ",
+    english:
+      "Obey Allah and His Messenger and do not dispute, or you will lose courage.",
+    bangla:
+      "আল্লাহ ও তাঁর রসূলের আনুগত্য কর এবং বিবাদ করো না, তাহলে তোমাদের শক্তি নষ্ট হয়ে যাবে।",
     reflection:
       "Do not fight your own plan. Follow today's mission list as written.",
     reminder: "One plan, followed, beats five begun.",
@@ -338,9 +489,12 @@ const GUIDANCE: GuidanceEntry[] = [
     id: "luqman-17",
     surah: 31,
     ayah: 17,
-    arabic: "يَا بُنَيَّ أَقِمِ الصَّلَاةَ وَأْمُرْ بِالْمَعْرُوفِ وَانْهَ عَنِ الْمُنكَرِ",
-    english: "O my son, establish prayer, enjoin what is right, and forbid what is wrong.",
-    bangla: "হে পুত্র, নামাজ কায়েম কর, সৎকাজের নির্দেশ দেব এবং অসৎ কাজ থেকে নিষেধ কর।",
+    arabic:
+      "يَا بُنَيَّ أَقِمِ الصَّلَاةَ وَأْمُرْ بِالْمَعْرُوفِ وَانْهَ عَنِ الْمُنكَرِ",
+    english:
+      "O my son, establish prayer, enjoin what is right, and forbid what is wrong.",
+    bangla:
+      "হে পুত্র, নামাজ কায়েম কর, সৎকাজের নির্দেশ দেব এবং অসৎ কাজ থেকে নিষেধ কর।",
     reflection:
       "Good character is part of the syllabus too. Study with honesty.",
     reminder: "How you study matters.",
@@ -360,8 +514,10 @@ const GUIDANCE: GuidanceEntry[] = [
     id: "baqarah-250",
     surah: 2,
     ayah: 250,
-    arabic: "وَكَم مِّن فِئَّةٍ قَلِيلَةٍ غَلَبَتْ فِئَّةً كَثِيرَةً بِإِذْنِ اللَّهِ",
-    english: "And how many a small company has overcome a large company by permission of Allah.",
+    arabic:
+      "وَكَم مِّن فِئَّةٍ قَلِيلَةٍ غَلَبَتْ فِئَّةً كَثِيرَةً بِإِذْنِ اللَّهِ",
+    english:
+      "And how many a small company has overcome a large company by permission of Allah.",
     bangla: "কত কম সংখ্যক দলই আল্লাহর অনুমতিতে বহুসংখ্যক দলকে পরাজিত করেছে।",
     reflection:
       "A short, focused session routinely beats a long distracted one.",
@@ -371,9 +527,12 @@ const GUIDANCE: GuidanceEntry[] = [
     id: "zumar-53",
     surah: 39,
     ayah: 53,
-    arabic: "قُلْ يَا عِبَادِيَ الَّذِينَ أَسْرَفُوا عَلَىٰ أَنفُسِهِمْ لَا تَقْنَطُوا مِن رَّحْمَةِ اللَّهِ",
-    english: "Say: O My servants who have transgressed against themselves, do not despair of the mercy of Allah.",
-    bangla: "বল, হে আমার ঐ বান্দারা যারা নিজেদের প্রতি অত্যাচার করেছ, আল্লাহর রহমত থেকে হতাশ হও না।",
+    arabic:
+      "قُلْ يَا عِبَادِيَ الَّذِينَ أَسْرَفُوا عَلَىٰ أَنفُسِهِمْ لَا تَقْنَطُوا مِن رَّحْمَةِ اللَّهِ",
+    english:
+      "Say: O My servants who have transgressed against themselves, do not despair of the mercy of Allah.",
+    bangla:
+      "বল, হে আমার ঐ বান্দারা যারা নিজেদের প্রতি অত্যাচার করেছ, আল্লাহর রহমত থেকে হতাশ হও না।",
     reflection:
       "A missed day is not a verdict. Open the app and do one small thing.",
     reminder: "No guilt. Just begin again.",
@@ -385,8 +544,7 @@ const GUIDANCE: GuidanceEntry[] = [
     arabic: "لَا تَيْأَسُوا مِن رَّوْحِ اللَّهِ",
     english: "Do not despair of the mercy of Allah.",
     bangla: "আল্লাহর রহমত থেকে হতাশ হও না।",
-    reflection:
-      "Yesterday's gap says nothing about today's capability.",
+    reflection: "Yesterday's gap says nothing about today's capability.",
     reminder: "Fresh start, same direction.",
   },
   {
@@ -408,7 +566,10 @@ export const GUIDANCE_COUNT = GUIDANCE.length;
  * Stable FNV-1a hash of a day key. Deterministic across devices and
  * reloads so the card never reshuffles mid-day.
  */
-export function guidanceIndexFor(dayKey: string, length = GUIDANCE_COUNT): number {
+export function guidanceIndexFor(
+  dayKey: string,
+  length = GUIDANCE_COUNT,
+): number {
   if (length <= 0) return 0;
   let hash = 0x811c9dc5;
   for (let index = 0; index < dayKey.length; index += 1) {

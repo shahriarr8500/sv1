@@ -138,3 +138,34 @@
     text-rendering: optimizeLegibility;
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Quran reading — Arabic typography                                   */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Quranic Arabic needs its own face, direction and spacing rules. The font
+ * stack is ordered so a purpose-drawn Quran font is used first, with Naskh
+ * fallbacks that keep the diacritics legible if the web font cannot load.
+ */
+.quran-arabic {
+  font-family: "Amiri Quran", "Noto Naskh Arabic", "Traditional Arabic",
+    "Scheherazade New", serif;
+  direction: rtl;
+  unicode-bidi: isolate;
+  text-align: right;
+  letter-spacing: 0;
+  word-spacing: 0.06em;
+  line-break: auto;
+  overflow-wrap: break-word;
+  font-feature-settings: "kern" 1, "liga" 1, "calt" 1;
+  text-rendering: optimizeLegibility;
+}
+
+/* Surah names in navigation and headers — Naskh reads better at small sizes. */
+.arabic-name {
+  font-family: "Noto Naskh Arabic", "Amiri Quran", "Traditional Arabic", serif;
+  direction: rtl;
+  unicode-bidi: isolate;
+  line-height: 1.7;
+}
