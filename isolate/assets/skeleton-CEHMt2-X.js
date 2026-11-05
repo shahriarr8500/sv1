@@ -1,0 +1,1 @@
+import{e as o,f as n}from"./index-CirEW9qJ.js";import{j as s}from"./framer-motion-QkBoEhga.js";const a=[["path",{d:"m15 18-6-6 6-6",key:"1wnfg3"}]],m=o("chevron-left",a);function d({className:e,...t}){return s.jsx("div",{"data-slot":"skeleton",className:n("bg-accent animate-pulse rounded-md",e),...t})}export{m as C,d as S};
